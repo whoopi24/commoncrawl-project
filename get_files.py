@@ -1,5 +1,6 @@
 # import packages
 from urllib.request import urlretrieve
+import time
 import os
 import re
 import random
@@ -7,6 +8,18 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+# function to recursively retry (10 times) to download a file
+def tryDownload(url, filename, retries=0):
+    if retries > 10:
+        print("Download failed.")
+        return
+    try:
+        urlretrieve(url, filename)
+    except:
+        time.sleep(1)
+        tryDownload(url, filename, retries+1)
+
+# function to create text corpus of specific crawl and for specific top-level domain
 def get_files(crawl_name, tld='^at,'):
     # download cluster.idx file for this crawl
     path1 = 'https://data.commoncrawl.org/cc-index/collections/'
@@ -17,7 +30,7 @@ def get_files(crawl_name, tld='^at,'):
     if not os.path.exists(crawl_dir):
         os.makedirs(crawl_dir)
     filename = os.path.join(crawl_dir, "cluster.txt")
-    urlretrieve(url, filename)
+    tryDownload(url, filename)
 
     # filter cdx files with top-level-domain (tld) at or de
     with open(filename, "rt") as file:
@@ -38,6 +51,6 @@ def get_files(crawl_name, tld='^at,'):
         print(file)
         url = path_ccrawl + file
         filename = os.path.join(crawl_dir, file)
-        urlretrieve(url, filename)
+        tryDownload(url, filename)
 
 
