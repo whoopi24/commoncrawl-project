@@ -95,11 +95,12 @@ def get_files(crawl_name, top_lvl_domain='at'):
 
 
 # function to create text corpus of specific crawl and for specific top-level domain
-def create_text_corpus(crawl_name, top_lvl_domain='at'):  # ToDo: maybe pre-processing before saving unnecessary lines ?
+def create_text_corpus(crawl_name, top_lvl_domain='at'):
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
     os.chdir(crawl_dir)
-    fnames = []
+    iter = 1
     for w in glob.glob("*.warc.wet.gz"):
+        print("Wet file nr. ", iter)
         fname = w.replace(".warc.wet.gz", "-text.txt")
         with open(w, 'rb') as stream, open(fname, 'wb') as f:
             for record in ArchiveIterator(stream):
@@ -111,17 +112,19 @@ def create_text_corpus(crawl_name, top_lvl_domain='at'):  # ToDo: maybe pre-proc
                     if match and length > 10000 and rec_type == "text/plain":
                         print(record.rec_headers.get_header('WARC-Target-URI'))
                         content = record.content_stream().read()
+                        # ToDo: maybe pre-processing before saving unnecessary lines ?
                         f.write(content)
-        fnames.append(fname)
+        iter += 1
     print("All wet files successfully pre-processed.")
-    return fnames
 
 
 # function to preprocess text corpus (.txt file)
-def preprocess_text_corpus(crawl_name, top_lvl_domain, fnames):
-    final_fname = os.path.join("S:", "msommer", crawl_name, top_lvl_domain, "text_corpus.txt")
+def preprocess_text_corpus(crawl_name, top_lvl_domain='at'):
+    crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
+    os.chdir(crawl_dir)
+    final_fname = os.path.join(crawl_dir, "text_corpus.txt")
     with open(final_fname, 'wt', encoding="utf-8") as f:
-        for fname in fnames:
+        for fname in glob.glob("*-text.txt"):
             with open(fname, "rt", encoding="utf-8") as file:
                 for line in file:
                     if line.count('.') < 2:
@@ -132,15 +135,17 @@ def preprocess_text_corpus(crawl_name, top_lvl_domain, fnames):
                         lang = "none"
                     if lang != "de":
                         continue
+                    # ToDo: remove stopwords, tokenization?
+                    # ToDO: encoding problems with Umlauten
+                    # ToDo: look into word2vec input requirements
                     f.write(line)
 
 
 if __name__ == '__main__':
-    import time
-    start_time = time.clock()
+    start_time = time.time()
     crawl_name = 'CC-MAIN-2013-20'   # take a small crawl for testing
     top_lvl_domain = 'at'
-    wet_files = get_files(crawl_name, top_lvl_domain)
-    fnames = create_text_corpus(wet_files, crawl_name, top_lvl_domain)
-    preprocess_text_corpus(crawl_name, top_lvl_domain, fnames)
-    print(time.clock() - start_time, "minutes")
+    #wet_files = get_files(crawl_name, top_lvl_domain)
+    create_text_corpus(crawl_name, top_lvl_domain)
+    #preprocess_text_corpus(crawl_name, top_lvl_domain)
+    print("Execution ran for", time.time() - start_time, "minutes")
