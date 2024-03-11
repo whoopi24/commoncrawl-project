@@ -9,6 +9,8 @@ import json
 from collections import Counter
 import time
 from warcio import ArchiveIterator
+import nltk
+nltk.download('stopwords')
 from langdetect import detect
 import pandas as pd
 import numpy as np
@@ -91,18 +93,17 @@ def get_files(crawl_name, top_lvl_domain='at'):
                         print(url)
                         tryDownload(url, filename)
     print("Download of wet files finished.")
-    return wet_files
 
 
 # function to create text corpus of specific crawl and for specific top-level domain
-def create_text_corpus(crawl_name, top_lvl_domain='at'):
+def transform_warc_to_txt(crawl_name, top_lvl_domain='at'):
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
     os.chdir(crawl_dir)
     iter = 1
     for w in glob.glob("*.warc.wet.gz"):
         print("Wet file nr. ", iter)
         fname = w.replace(".warc.wet.gz", "-text.txt")
-        with open(w, 'rb') as stream, open(fname, 'wb') as f:
+        with open(w, 'rb') as stream, open(fname, 'wt', encoding='utf-8') as f:
             for record in ArchiveIterator(stream):
                 if record.rec_type == 'conversion':
                     regex = '\.' + top_lvl_domain + '/'
@@ -111,41 +112,46 @@ def create_text_corpus(crawl_name, top_lvl_domain='at'):
                     rec_type = record.rec_headers.get_header('Content-Type')
                     if match and length > 10000 and rec_type == "text/plain":
                         print(record.rec_headers.get_header('WARC-Target-URI'))
-                        content = record.content_stream().read()
+                        content = record.content_stream().read().decode('utf-8', errors='replace')
                         # ToDo: maybe pre-processing before saving unnecessary lines ?
                         f.write(content)
         iter += 1
     print("All wet files successfully pre-processed.")
 
-
-# function to preprocess text corpus (.txt file)
-def preprocess_text_corpus(crawl_name, top_lvl_domain='at'):
+# function to create text corpus of specific crawl and for specific top-level domain
+def create_text_corpus(crawl_name, top_lvl_domain='at'):
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
-    os.chdir(crawl_dir)
-    final_fname = os.path.join(crawl_dir, "text_corpus.txt")
-    with open(final_fname, 'wt', encoding="utf-8") as f:
+    output_file = os.path.join(crawl_dir, "text_corpus.txt")
+    stop_words = nltk.corpus.stopwords.words('german')
+    min_stopwords = 10
+    with open(output_file, 'w', encoding="utf-8") as output:
+        os.chdir(crawl_dir)
         for fname in glob.glob("*-text.txt"):
             with open(fname, "rt", encoding="utf-8") as file:
+                last_line = None
                 for line in file:
-                    if line.count('.') < 2:
-                        continue
-                    try:
-                        lang = detect(line)
-                    except:
-                        lang = "none"
-                    if lang != "de":
+                    sw_cnt = sum(word in stop_words for word in line.split())
+                    comma_cnt = line.count(',')
+                    if sw_cnt < min_stopwords or line.count('.') < 3 or len(line) < 100 or comma_cnt / sw_cnt > 1:
                         continue
                     # ToDo: remove stopwords, tokenization?
-                    # ToDO: encoding problems with Umlauten
+                    # ToDO: encoding problems with Umlauten -> not solvable
                     # ToDo: look into word2vec input requirements
-                    f.write(line)
+                    # ToDo: remove "word" which are not actually words (and super long)
+                    # remove duplicated sequential lines
+                    if line == last_line:
+                        continue
+                    output.write(line)
+                    last_line = line
 
+# function to preprocess text corpus (text_corpus.txt file)
+#def preprocess_text_corpus(crawl_name, top_lvl_domain='at'):
 
 if __name__ == '__main__':
     start_time = time.time()
     crawl_name = 'CC-MAIN-2013-20'   # take a small crawl for testing
     top_lvl_domain = 'at'
-    #wet_files = get_files(crawl_name, top_lvl_domain)
+    #get_files(crawl_name, top_lvl_domain)
+    #transform_warc_to_txt(crawl_name, top_lvl_domain)
     create_text_corpus(crawl_name, top_lvl_domain)
-    #preprocess_text_corpus(crawl_name, top_lvl_domain)
-    print("Execution ran for", time.time() - start_time, "minutes")
+    print("Execution ran for", time.time() - start_time, "seconds")
