@@ -11,12 +11,13 @@ import time
 from warcio import ArchiveIterator
 import string
 import nltk
-
+# ToDo: check availability (not always download)
 nltk.download('stopwords')
 nltk.download('punkt')
-from langdetect import detect
-import pandas as pd
-import numpy as np
+nltk.download('wordnet')
+from HanTa import HanoverTagger as ht
+# import pandas as pd
+# import numpy as np
 
 
 # function to count punctuation markers, stopwords and line breaks
@@ -48,7 +49,7 @@ def tryDownload(url, filename, retries=0):
 
 
 # function to get wet files of specific crawl and for specific top-level domain
-def get_files(crawl_name, top_lvl_domain='at'):
+def get_files(crawl_name, top_lvl_domain='at', files_cnt=500):
     # download cluster.idx file for this crawl
     path1 = 'https://data.commoncrawl.org/cc-index/collections/'
     path2 = '/indexes/'
@@ -81,7 +82,7 @@ def get_files(crawl_name, top_lvl_domain='at'):
         url = path_ccrawl + file
         filename = os.path.join(crawl_dir, file)
         tryDownload(url, filename)
-        print("Successfully downloaded" + file)
+        print("Successfully downloaded " + file)
 
     # get correct wet files
     wet_files = []
@@ -101,18 +102,21 @@ def get_files(crawl_name, top_lvl_domain='at'):
             count_dict = Counter(warc_files)
 
             # only download wet files with a lot of occurrences
-
+            iter = 0
             for key, value in count_dict.items():
                 if value >= 50:
                     key = key.replace("/warc/", "/wet/").replace("warc.gz", "warc.wet.gz")
                     key_path = key.split("/")[-1]
                     filename = os.path.join(crawl_dir, key_path)
                     if filename not in wet_files:
+                        iter += 1
                         wet_files.append(filename)
                         url = "https://data.commoncrawl.org/" + key
                         print(url)
                         tryDownload(url, filename)
-    print("Download of wet files finished.")
+                    if iter >= files_cnt:
+                        break
+    print("Download of wet.gz files finished.")
 
 
 # function to create text corpus of specific crawl and for specific top-level domain
@@ -126,8 +130,7 @@ def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=500):
         for wet_file in glob.glob("*.warc.wet.gz"):
             iter += 1
             print("Wet file nr. ", iter)
-            #fname = wet_file.replace(".warc.wet.gz", "-text.txt")
-            with open(wet_file, 'rb') as stream: #, open(fname, 'wt', encoding='utf-8') as f:
+            with open(wet_file, 'rb') as stream:
                 for record in ArchiveIterator(stream):
                     if record.rec_type == 'conversion':
                         regex = '\.' + top_lvl_domain + '/'
@@ -135,10 +138,10 @@ def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=500):
                         length = int(record.rec_headers.get_header('Content-Length'))
                         rec_type = record.rec_headers.get_header('Content-Type')
                         if match and length > 10000 and rec_type == "text/plain":
-                            #print(record.rec_headers.get_header('WARC-Target-URI'))
+                            # print(record.rec_headers.get_header('WARC-Target-URI'))
                             content = record.content_stream().read().decode('utf-8', errors='replace')
                             pct_cnt, sw_cnt, lb_cnt = count_pct_and_stopwords(content, stop_words)
-                            #print(pct_cnt, sw_cnt, lb_cnt)
+                            # print(pct_cnt, sw_cnt, lb_cnt)
                             if sw_cnt == 0:
                                 continue
                             elif pct_cnt / sw_cnt > 1 or lb_cnt / sw_cnt > 0.5:
@@ -152,35 +155,65 @@ def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=500):
 # function to preprocess text corpus of specific crawl and for specific top-level domain
 def preprocess_text_corpus(crawl_name, top_lvl_domain='at'):
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
-    output_file = os.path.join(crawl_dir, "text_corpus.txt")
-    stop_words = nltk.corpus.stopwords.words('german')
-    min_stopwords = 10
-    with open(output_file, 'w', encoding="utf-8") as output:
-        os.chdir(crawl_dir)
-        for fname in glob.glob("*-text.txt"):
-            with open(fname, "rt", encoding="utf-8") as file:
-                last_line = None
-                for line in file:
-                    sw_cnt = sum(word in stop_words for word in line.split())
-                    comma_cnt = line.count(',')
-                    if sw_cnt < min_stopwords or line.count('.') < 3 or len(line) < 100 or comma_cnt / sw_cnt > 1:
-                        continue
-                    # ToDo: tokenization, remove stopwords optional
-                    # ToDO: encoding problems with Umlauten -> not solvable
-                    # ToDo: look into word2vec input requirements
-                    # ToDo: remove "word" which are not actually words (and super long)
-                    # ToDo: remove duplicated sequential lines
-                    if line == last_line:
-                        continue
-                    output.write(line)
-                    last_line = line
+    output_file = os.path.join(crawl_dir, "text_corpus_processed.txt")
+    input_file = os.path.join(crawl_dir, "text_corpus.txt")
+    #lemmatizer = nltk.WordNetLemmatizer()
+    tagger_de = ht.HanoverTagger('morphmodel_ger.pgz')
+
+    with open(output_file, 'wt', encoding="utf-8") as output:
+        with open(input_file, "rt", encoding="utf-8") as input:
+            last_line = None
+            for line in input:
+                # print(line)
+                # ignore single words
+                if len(line) < 50:  # or line.count('.') < 3
+                    continue
+
+                # remove URLs and HTML tags
+                pattern1 = r"(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])"
+                pattern2 = r"<[^>]+>"
+                pattern3 = r"\[([^]]+)\]"
+                to_match = [pattern1, pattern2, pattern3]
+                cleaned_line = re.sub('|'.join(to_match), "", line)
+
+                # tokenization
+                line_tok = nltk.word_tokenize(cleaned_line)
+
+                # remove punctuation and long 'words'
+                filtered_tok = [token.strip() for token in line_tok
+                                if token not in string.punctuation and len(token) < 20]
+
+                # split "words" which are not actually words (and super long)
+                #new_tok = [re.split('(?<=.)(?=[A-Z])', token) for token in filtered_tok]
+
+                # lemmatization
+                lemma_line = tagger_de.tag_sent(filtered_tok)
+
+                # can only write strings (not lists)
+                final_line = " ".join(lemma_line)
+
+                # ToDo: find option to combine this lemmatizer with word2vec
+
+                # remove duplicated sequential lines
+                if final_line == last_line:
+                    continue
+                output.write(final_line)
+                last_line = final_line
+
+                # ToDO: encoding problems with Umlauten -> not solvable
+                # ToDo: look into word2vec input requirements
+
+
+# ToDo: optional stopwords removal before word2vec
+#if rm_stopwords:
+#   filtered_tok = [token for token in line_tok if token not in stop_words]
 
 
 if __name__ == '__main__':
     start_time = time.time()
     crawl_name = 'CC-MAIN-2013-20'  # take a small crawl for testing
     top_lvl_domain = 'at'
-    #get_files(crawl_name, top_lvl_domain)
-    create_text_corpus(crawl_name, top_lvl_domain)
-    #preprocess_text_corpus(crawl_name, top_lvl_domain)
+    # get_files(crawl_name, top_lvl_domain)
+    # create_text_corpus(crawl_name, top_lvl_domain)
+    preprocess_text_corpus(crawl_name, top_lvl_domain)
     print("Execution ran for", time.time() - start_time, "seconds")
