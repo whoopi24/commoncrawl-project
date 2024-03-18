@@ -13,6 +13,7 @@ import string
 from HanTa import HanoverTagger as ht
 from gensim.models import Word2Vec
 import multiprocessing
+import pickle
 
 # check availability of nltk resources
 import nltk
@@ -22,16 +23,16 @@ except LookupError:
     print('Resource not found. Downloading now...')
     nltk.download('stopwords')
 try:
-    text = "That is a test."
-    test = nltk.word_tokenize(text)
+    test = "That is a test."
+    test = nltk.word_tokenize(test)
 except LookupError:
     print('Resource not found. Downloading now...')
     nltk.download('punkt')
-try:
-    lemmatizer = nltk.WordNetLemmatizer()
-except LookupError:
-    print('Resource not found. Downloading now...')
-    nltk.download('wordnet')
+# try:
+#     lemmatizer = nltk.WordNetLemmatizer()
+# except LookupError:
+#     print('Resource not found. Downloading now...')
+#     nltk.download('wordnet')
 
 # import pandas as pd
 # import numpy as np
@@ -173,128 +174,124 @@ def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=500):
 # function to preprocess text corpus of specific crawl and for specific top-level domain
 def preprocess_text_corpus(crawl_name, top_lvl_domain='at', rm_stopwords=False):
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
-    output_fname = os.path.join(crawl_dir, "text_corpus_processed_sw_removal_" + str(rm_stopwords) + ".txt")
     input_fname = os.path.join(crawl_dir, "text_corpus.txt")
-    stop_words = nltk.corpus.stopwords.words('german')
     tagger_de = ht.HanoverTagger('morphmodel_ger.pgz')
 
-    with open(output_fname, 'wt', encoding="utf-8") as output:
-        with open(input_fname, "rt", encoding="utf-8") as input_file:
-            final_sent = []
-            last_line = None
-            for line in input_file:
+    # Pre-compile regular expressions
+    pattern1 = re.compile(r"(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])")
+    pattern2 = re.compile(r"<[^>]+>")
+    pattern3 = re.compile(r"\[([^]]+)\]")
 
-                # ignore very short lines, e.g. single words
-                if len(line) < 50:
+    # usage of sets for faster membership checks
+    stop_words = set(nltk.corpus.stopwords.words('german'))
+
+    with open(input_fname, "rt", encoding="utf-8") as input_file:
+        final_sent = []
+        last_line = None
+        t = time.time()
+        iter = 0
+
+        for line in input_file:
+            iter += 1
+            # print progress
+            if iter % 500 == 0:
+                print(iter)
+
+            # ignore very short lines, e.g. single words
+            if len(line) < 50:
+                continue
+
+            # remove URLs and HTML tags
+            cleaned_line = line
+            for pattern in [pattern1, pattern2, pattern3]:
+                cleaned_line = pattern.sub("", cleaned_line)
+
+            # sentence tokenization
+            sentences = nltk.sent_tokenize(cleaned_line)
+
+            # further pre-processing steps
+            for sent in sentences:
+                # word tokenization
+                line_tok = sent.split()     # line_tok = nltk.word_tokenize(sent)
+                # remove punctuation and long 'words'
+                filtered_tok = [token.strip() for token in line_tok
+                                if token not in string.punctuation and len(token) < 16]
+                # optional stopwords removal
+                if rm_stopwords:
+                    filtered_tok = [token for token in filtered_tok if token not in stop_words]
+                # lemmatization
+                final_line = [lemma for (word, lemma, pos) in tagger_de.tag_sent(filtered_tok)]
+                # remove duplicated sequential lines
+                if final_line == last_line:
                     continue
+                # append list
+                final_sent.append(final_line)
+                last_line = final_line
 
-                # remove URLs and HTML tags
-                pattern1 = r"(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])"
-                pattern2 = r"<[^>]+>"
-                pattern3 = r"\[([^]]+)\]"
-                to_match = [pattern1, pattern2, pattern3]
-                cleaned_line = re.sub('|'.join(to_match), "", line)
+    print('Time to pre-process text: {} minutes'.format(round((time.time() - t) / 60, 2)))
 
-                # sentence tokenization
-                sentences = nltk.sent_tokenize(cleaned_line)
-
-                # further pre-processing steps
-                for sent in sentences:
-                    # word tokenization
-                    line_tok = nltk.word_tokenize(sent)
-                    # remove punctuation and long 'words'
-                    filtered_tok = [token.strip() for token in line_tok
-                                    if token not in string.punctuation and len(token) < 20]
-                    # optional stopwords removal
-                    if rm_stopwords:
-                        filtered_tok = [token for token in filtered_tok if token not in stop_words]
-                    # lemmatization
-                    final_line = [lemma for (word, lemma, pos) in tagger_de.tag_sent(filtered_tok)]
-                    # remove duplicated sequential lines
-                    if final_line == last_line:
-                        continue
-                    # append list
-                    final_sent.append(final_line)
-                    last_line = final_line
-
-            # ToDo: Test word2vec requirements and functions
-            model = Word2Vec(min_count=20,
-                             window=2,
-                             # size=300,
-                             sample=6e-5,
-                             alpha=0.03,
-                             min_alpha=0.0007,
-                             negative=20,
-                             workers=cores - 1)
-
-            t = time.time()
-            model.build_vocab(final_sent, progress_per=10000)
-            print('Time to build vocab: {} mins'.format(round((time.time() - t) / 60, 2)))
+    # save list of tokenized sentences as pickle
+    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_sw_removal_" + str(rm_stopwords))
+    with open(pickle_fname, "wb") as save_pickle:
+        pickle.dump(final_sent, save_pickle)
 
 
 def train_model(crawl_name, top_lvl_domain='at', rm_stopwords=False):
     cores = multiprocessing.cpu_count()  # number of cores in computer
-    tagger_de = ht.HanoverTagger('morphmodel_ger.pgz')
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
-    fname = os.path.join(crawl_dir, "text_corpus_processed.txt")
-    file = open(fname, 'rt', encoding="utf-8")
-    text = file.read()
 
-    # sentence tokenization
-    sentences = nltk.sent_tokenize(text)
+    # load preprocessed data
+    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_sw_removal_" + str(rm_stopwords))
+    with open(pickle_fname, "rb") as load_pickle:
+        sentences = pickle.load(load_pickle)
 
-    # word tokenization
-    line_tok = nltk.word_tokenize(sentences)
-
-    # lemmatization
-    line_lemma = []
-    for sent in line_tok:
-        print(sent.split())
-        lemma = [lemma for (word, lemma, pos) in tagger_de.tag_sent(sent.split())]
-        print(lemma)
-        line_lemma.append(' '.join(lemma))
-
-    # optional stopwords removal
-    if rm_stopwords:
-        stop_words = nltk.corpus.stopwords.words('german')
-        # ToDo: grab words from sentences
-        sentences = [token for token in line_tok if token not in stop_words]
-
-    # ToDo: look into word2vec input requirements
-    model = Word2Vec(min_count=20,
-                         window=2,
-                         #size=300,
-                         sample=6e-5,
-                         alpha=0.03,
-                         min_alpha=0.0007,
-                         negative=20,
-                         workers=cores-1)
+    # ToDo: parameter tuning of word2vec arguments
+    model = Word2Vec(min_count=5,
+                     window=5,
+                     vector_size=100,
+                     sample=6e-5,
+                     alpha=0.03,
+                     min_alpha=0.0007,
+                     negative=20,
+                     workers=cores-1)
 
     t = time.time()
     model.build_vocab(sentences, progress_per=10000)
-    print('Time to build vocab: {} mins'.format(round((time.time() - t) / 60, 2)))
+    print('Time to build vocab: {} minutes'.format(round((time.time() - t) / 60, 2)))
 
     t = time.time()
     model.train(sentences, total_examples=model.corpus_count, epochs=30, report_delay=1)
-    print('Time to train the model: {} mins'.format(round((time.time() - t) / 60, 2)))
-
-    # memory-efficient model
-    model.init_sims(replace=True)
+    print('Time to train the model: {} minutes'.format(round((time.time() - t) / 60, 2)))
 
     # save model
+    model_fname = os.path.join(crawl_dir, "word2vec_sw_removal_" + str(rm_stopwords) + ".model")
+    model.save(model_fname)
 
-    # save word sets of target words
-    w1 = model.most_similar('angreifen', 10)
-    w1 = model.similar_by_word('angreifen', 10)
-    model.wv.most_similar(positive=["homer"])
+
+def evaluate_model(crawl_name, top_lvl_domain='at', rm_stopwords=False):
+    crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
+
+    # load model
+    model_fname = os.path.join(crawl_dir, "word2vec_sw_removal_" + str(rm_stopwords) + ".model")
+    model = Word2Vec.load(model_fname)
+
+    # validate word sets of target words
+    target_words = ['angreifen', 'anfassen', 'anlangen']
+    for target in target_words:
+        w1 = model.wv.most_similar(target, 10)
+        w2 = model.wv.similar_by_word(target, 10)
+        print(w1)
+        print(w2)
 
 
 if __name__ == '__main__':
     t = time.time()
-    crawl_name = 'CC-MAIN-2013-20'  # take a small crawl for testing
+    crawl_name = 'CC-MAIN-2023-40'  # take a small crawl for testing
     top_lvl_domain = 'at'
+    rm_stopwords = False
     # get_files(crawl_name, top_lvl_domain)
-    # create_text_corpus(crawl_name, top_lvl_domain)
-    preprocess_text_corpus(crawl_name, top_lvl_domain)
-    #train_model(crawl_name, top_lvl_domain, rm_stopwords=False)
+    create_text_corpus(crawl_name, top_lvl_domain)
+    # preprocess_text_corpus(crawl_name, top_lvl_domain, rm_stopwords)
+    # train_model(crawl_name, top_lvl_domain, rm_stopwords)
+    # evaluate_model(crawl_name, top_lvl_domain, rm_stopwords)
     print("Execution ran for", round((time.time() - t) / 60, 2), "minutes.")
