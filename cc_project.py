@@ -67,7 +67,7 @@ def tryDownload(url, filename, retries=0):
 
 
 # function to get wet files of specific crawl and for specific top-level domain
-def get_files(crawl_name, top_lvl_domain='at', files_cnt=500):
+def get_files(crawl_name, top_lvl_domain='at', files_cnt=700):
     # download cluster.idx file for this crawl
     path1 = 'https://data.commoncrawl.org/cc-index/collections/'
     path2 = '/indexes/'
@@ -77,7 +77,10 @@ def get_files(crawl_name, top_lvl_domain='at', files_cnt=500):
     if not os.path.exists(crawl_dir):
         os.makedirs(crawl_dir)
     cluster_file = os.path.join(crawl_dir, "cluster.txt")
-    tryDownload(url, cluster_file)
+    if not os.path.exists(cluster_file):
+        tryDownload(url, cluster_file)
+    else:
+        print(f"The file '{cluster_file}' already exists.")
 
     # filter cdx files with top-level-domain (tld) at or de
     regex = '^' + top_lvl_domain + ','
@@ -98,15 +101,20 @@ def get_files(crawl_name, top_lvl_domain='at', files_cnt=500):
     # download cdx files
     for file in cdx_files:
         url = path_ccrawl + file
-        filename = os.path.join(crawl_dir, file)
-        tryDownload(url, filename)
-        print("Successfully downloaded " + file)
+        file_path = os.path.join(crawl_dir, file)
+        if not os.path.exists(file_path):
+            tryDownload(url, file_path)
+            print("Successfully downloaded " + file)
+        else:
+            print(f"The file '{file_path}' already exists.")
+
 
     # get correct wet files
     wet_files = []
     for file in cdx_files:
         warc_files = []
         filename = os.path.join(crawl_dir, file)
+        iter = 0
         with gzip.open(filename, 'rt') as f:
             for line in f:
                 match = re.search(regex, line)
@@ -119,14 +127,18 @@ def get_files(crawl_name, top_lvl_domain='at', files_cnt=500):
                         warc_files.append(warc)
             count_dict = Counter(warc_files)
 
+            # ToDo: order dict to take files with most occurrences first
+
             # only download wet files with a lot of occurrences
-            iter = 0
             for key, value in count_dict.items():
                 if value >= 50:
                     key = key.replace("/warc/", "/wet/").replace("warc.gz", "warc.wet.gz")
                     key_path = key.split("/")[-1]
                     filename = os.path.join(crawl_dir, key_path)
-                    if filename not in wet_files:
+                    if os.path.exists(filename):
+                        print("File already exists.")
+                        continue
+                    elif filename not in wet_files:
                         iter += 1
                         wet_files.append(filename)
                         url = "https://data.commoncrawl.org/" + key
@@ -138,7 +150,7 @@ def get_files(crawl_name, top_lvl_domain='at', files_cnt=500):
 
 
 # function to create text corpus of specific crawl and for specific top-level domain
-def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=500):
+def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=1000):
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
     output_file = os.path.join(crawl_dir, "text_corpus.txt")
     stop_words = nltk.corpus.stopwords.words('german')
@@ -167,7 +179,7 @@ def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=500):
                             output.write(content)
             if iter >= files_cnt:
                 break
-    print("All wet files successfully pre-processed.")
+    print("Text corpus successfully created.")
     # Note: encoding problems with umlauts -> not solvable since umlauts are incorrectly encoded in source files
 
 
@@ -178,9 +190,9 @@ def preprocess_text_corpus(crawl_name, top_lvl_domain='at', rm_stopwords=False):
     tagger_de = ht.HanoverTagger('morphmodel_ger.pgz')
 
     # Pre-compile regular expressions
-    pattern1 = re.compile(r"(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])")
-    pattern2 = re.compile(r"<[^>]+>")
-    pattern3 = re.compile(r"\[([^]]+)\]")
+    pattern1 = re.compile(r'(http|ftp|https)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])')
+    pattern2 = re.compile(r'<[^>]+>')
+    pattern3 = re.compile(r'\[([^]]+)]')
 
     # usage of sets for faster membership checks
     stop_words = set(nltk.corpus.stopwords.words('german'))
@@ -278,20 +290,21 @@ def evaluate_model(crawl_name, top_lvl_domain='at', rm_stopwords=False):
     # validate word sets of target words
     target_words = ['angreifen', 'anfassen', 'anlangen']
     for target in target_words:
+        # ToDo: find out difference btw these fcts
         w1 = model.wv.most_similar(target, 10)
-        w2 = model.wv.similar_by_word(target, 10)
+        w2 = model.wv.similar_by_word(target, 10)  # seems better
         print(w1)
         print(w2)
 
 
 if __name__ == '__main__':
     t = time.time()
-    crawl_name = 'CC-MAIN-2023-40'  # take a small crawl for testing
+    crawl_name = 'CC-MAIN-2013-20'  # take a small crawl for testing
     top_lvl_domain = 'at'
     rm_stopwords = False
     # get_files(crawl_name, top_lvl_domain)
-    create_text_corpus(crawl_name, top_lvl_domain)
-    # preprocess_text_corpus(crawl_name, top_lvl_domain, rm_stopwords)
-    # train_model(crawl_name, top_lvl_domain, rm_stopwords)
-    # evaluate_model(crawl_name, top_lvl_domain, rm_stopwords)
+    # create_text_corpus(crawl_name, top_lvl_domain)
+    preprocess_text_corpus(crawl_name, top_lvl_domain, rm_stopwords)
+    train_model(crawl_name, top_lvl_domain, rm_stopwords)
+    evaluate_model(crawl_name, top_lvl_domain, rm_stopwords)
     print("Execution ran for", round((time.time() - t) / 60, 2), "minutes.")
