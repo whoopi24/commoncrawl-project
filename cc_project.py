@@ -28,11 +28,6 @@ try:
 except LookupError:
     print('Resource not found. Downloading now...')
     nltk.download('punkt')
-# try:
-#     lemmatizer = nltk.WordNetLemmatizer()
-# except LookupError:
-#     print('Resource not found. Downloading now...')
-#     nltk.download('wordnet')
 
 # import pandas as pd
 # import numpy as np
@@ -125,27 +120,24 @@ def get_files(crawl_name, top_lvl_domain='at', files_cnt=700):
                     warc = d["filename"]
                     if int(d["length"]) > 10000:
                         warc_files.append(warc)
-            count_dict = Counter(warc_files)
-
-            # ToDo: order dict to take files with most occurrences first
+            count_dict = Counter(warc_files).most_common()
 
             # only download wet files with a lot of occurrences
-            for key, value in count_dict.items():
-                if value >= 50:
-                    key = key.replace("/warc/", "/wet/").replace("warc.gz", "warc.wet.gz")
-                    key_path = key.split("/")[-1]
-                    filename = os.path.join(crawl_dir, key_path)
-                    if os.path.exists(filename):
-                        print("File already exists.")
-                        continue
-                    elif filename not in wet_files:
-                        iter += 1
-                        wet_files.append(filename)
-                        url = "https://data.commoncrawl.org/" + key
-                        print(url)
-                        tryDownload(url, filename)
-                    if iter >= files_cnt:
-                        break
+            for key, value in count_dict:
+                if value < 50 or iter >= files_cnt:
+                    break
+                key = key.replace("/warc/", "/wet/").replace("warc.gz", "warc.wet.gz")
+                key_path = key.split("/")[-1]
+                filename = os.path.join(crawl_dir, key_path)
+                if os.path.exists(filename):
+                    print("File already exists.")
+                    continue
+                elif filename not in wet_files:
+                    iter += 1
+                    wet_files.append(filename)
+                    url = "https://data.commoncrawl.org/" + key
+                    print(url)
+                    tryDownload(url, filename)
     print("Download of wet.gz files finished.")
 
 
@@ -184,8 +176,7 @@ def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=1000):
 
 
 # function to preprocess text corpus of specific crawl and for specific top-level domain
-def preprocess_text_corpus(crawl_name, top_lvl_domain='at', rm_stopwords=False):
-    crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
+def preprocess_text_corpus(crawl_dir, rm_stopwords=False):
     input_fname = os.path.join(crawl_dir, "text_corpus.txt")
     tagger_de = ht.HanoverTagger('morphmodel_ger.pgz')
 
@@ -248,9 +239,8 @@ def preprocess_text_corpus(crawl_name, top_lvl_domain='at', rm_stopwords=False):
         pickle.dump(final_sent, save_pickle)
 
 
-def train_model(crawl_name, top_lvl_domain='at', rm_stopwords=False):
+def train_model(crawl_dir, rm_stopwords=False):
     cores = multiprocessing.cpu_count()  # number of cores in computer
-    crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
 
     # load preprocessed data
     pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_sw_removal_" + str(rm_stopwords))
@@ -280,9 +270,7 @@ def train_model(crawl_name, top_lvl_domain='at', rm_stopwords=False):
     model.save(model_fname)
 
 
-def evaluate_model(crawl_name, top_lvl_domain='at', rm_stopwords=False):
-    crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
-
+def evaluate_model(crawl_dir, rm_stopwords=False):
     # load model
     model_fname = os.path.join(crawl_dir, "word2vec_sw_removal_" + str(rm_stopwords) + ".model")
     model = Word2Vec.load(model_fname)
@@ -301,10 +289,11 @@ if __name__ == '__main__':
     t = time.time()
     crawl_name = 'CC-MAIN-2013-20'  # take a small crawl for testing
     top_lvl_domain = 'at'
+    crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
     rm_stopwords = False
     # get_files(crawl_name, top_lvl_domain)
     # create_text_corpus(crawl_name, top_lvl_domain)
-    preprocess_text_corpus(crawl_name, top_lvl_domain, rm_stopwords)
-    train_model(crawl_name, top_lvl_domain, rm_stopwords)
-    evaluate_model(crawl_name, top_lvl_domain, rm_stopwords)
+    preprocess_text_corpus(crawl_dir, rm_stopwords)
+    train_model(crawl_dir, rm_stopwords)
+    evaluate_model(crawl_dir, rm_stopwords)
     print("Execution ran for", round((time.time() - t) / 60, 2), "minutes.")
