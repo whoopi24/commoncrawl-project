@@ -1,22 +1,28 @@
 # import packages
-from urllib.request import urlretrieve
 import glob
-import os
-import re
-import random
 import gzip
 import json
-from collections import Counter
-import time
-from warcio import ArchiveIterator
-import string
-from HanTa import HanoverTagger as ht
-from gensim.models import Word2Vec
 import multiprocessing
+import os
 import pickle
+import random
+import re
+import string
+import time
+from collections import Counter
+from urllib.request import urlretrieve
 
 # check availability of nltk resources
 import nltk
+import spacy_udpipe
+from spacy.tokenizer import Tokenizer
+from HanTa import HanoverTagger as ht
+from gensim.models import Word2Vec
+from warcio import ArchiveIterator
+
+# download German spacy model
+spacy_udpipe.download("de")
+
 try:
     stop_words = nltk.corpus.stopwords.words('german')
 except LookupError:
@@ -28,6 +34,7 @@ try:
 except LookupError:
     print('Resource not found. Downloading now...')
     nltk.download('punkt')
+
 
 # import pandas as pd
 # import numpy as np
@@ -62,7 +69,7 @@ def tryDownload(url, filename, retries=0):
 
 
 # function to get wet files of specific crawl and for specific top-level domain
-def get_files(crawl_name, top_lvl_domain='at', files_cnt=700):
+def get_files(crawl_name, top_lvl_domain='at', files_cnt=1000):
     # download cluster.idx file for this crawl
     path1 = 'https://data.commoncrawl.org/cc-index/collections/'
     path2 = '/indexes/'
@@ -103,7 +110,6 @@ def get_files(crawl_name, top_lvl_domain='at', files_cnt=700):
         else:
             print(f"The file '{file_path}' already exists.")
 
-
     # get correct wet files
     wet_files = []
     for file in cdx_files:
@@ -120,6 +126,7 @@ def get_files(crawl_name, top_lvl_domain='at', files_cnt=700):
                     warc = d["filename"]
                     if int(d["length"]) > 10000:
                         warc_files.append(warc)
+            # order dict by most common wet files (descending order of value)
             count_dict = Counter(warc_files).most_common()
 
             # only download wet files with a lot of occurrences
@@ -176,8 +183,54 @@ def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=1000):
 
 
 # function to preprocess text corpus of specific crawl and for specific top-level domain
+def preprocess_text_corpus_udpipe(crawl_dir):
+    # ToDo: change fname to "text_corpus.txt"
+    input_fname = os.path.join(crawl_dir, "text_corpus_test.txt")
+
+    # load German spacy model
+    nlp = spacy_udpipe.load("de")
+
+    with open(input_fname, "rt", encoding="utf-8") as input_file:
+        final_sent = []
+        t = time.time()
+        text = input_file.read()
+        n = len(text)
+
+        # presegmentation (List[str])/pretokenization (List[List[str]])
+        # sentences = nltk.sent_tokenize(text)  -> doesnt work
+
+        # ValueError: [E088] Text of length 2684477 exceeds maximum of 1000000.
+        # The parser and NER models require roughly 1GB of temporary memory per 100,000 characters in the input.
+        # This means long texts may cause memory allocation errors. If you're not using the parser or NER,
+        # it's probably safe to increase the `nlp.max_length` limit. The limit is in number of characters,
+        # so you can check whether your inputs are too long by checking `len(text)`.
+        if n > 1000000:
+            nlp.max_length = n
+
+        # use udpipe model
+        doc = nlp(text)
+
+        for token in doc:
+            #if token.is_alpha and len(token) < 16:
+            #    filtered_tok = [token.strip() for token in line_tok
+            #                    if token.is_alpha and len(token) < 16]
+
+            print(token.text, token.lemma_, token.pos_, token.tag_, token.dep_, token.shape_, token.is_alpha,
+                  token.is_stop)
+            # append list
+            final_sent.append(token)
+
+    print('Time to pre-process text: {} minutes'.format(round((time.time() - t) / 60, 2)))
+
+    # save list of tokenized sentences as pickle
+    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_udpipe_" + str(rm_stopwords))
+    with open(pickle_fname, "wb") as save_pickle:
+        pickle.dump(final_sent, save_pickle)
+
+
 def preprocess_text_corpus(crawl_dir, rm_stopwords=False):
-    input_fname = os.path.join(crawl_dir, "text_corpus.txt")
+    # ToDo: change fname to "text_corpus.txt"
+    input_fname = os.path.join(crawl_dir, "text_corpus_test.txt")
     tagger_de = ht.HanoverTagger('morphmodel_ger.pgz')
 
     # Pre-compile regular expressions
@@ -215,7 +268,7 @@ def preprocess_text_corpus(crawl_dir, rm_stopwords=False):
             # further pre-processing steps
             for sent in sentences:
                 # word tokenization
-                line_tok = sent.split()     # line_tok = nltk.word_tokenize(sent)
+                line_tok = sent.split()  # line_tok = nltk.word_tokenize(sent)
                 # remove punctuation and long 'words'
                 filtered_tok = [token.strip() for token in line_tok
                                 if token not in string.punctuation and len(token) < 16]
@@ -255,7 +308,7 @@ def train_model(crawl_dir, rm_stopwords=False):
                      alpha=0.03,
                      min_alpha=0.0007,
                      negative=20,
-                     workers=cores-1)
+                     workers=cores - 1)
 
     t = time.time()
     model.build_vocab(sentences, progress_per=10000)
@@ -278,22 +331,24 @@ def evaluate_model(crawl_dir, rm_stopwords=False):
     # validate word sets of target words
     target_words = ['angreifen', 'anfassen', 'anlangen']
     for target in target_words:
-        # ToDo: find out difference btw these fcts
-        w1 = model.wv.most_similar(target, 10)
+        # ToDo: find out difference btw these fcts - https://stackoverflow.com/questions/50275623/difference-between-most-similar-and-similar-by-vector-in-gensim-word2vec
+        # ToDo: mehr Woerter verwenden - 10,20,50,100 ausprobieren
+        # w1 = model.wv.most_similar(target, 10)
         w2 = model.wv.similar_by_word(target, 10)  # seems better
-        print(w1)
+        # print(w1)
         print(w2)
 
 
 if __name__ == '__main__':
     t = time.time()
-    crawl_name = 'CC-MAIN-2013-20'  # take a small crawl for testing
+    crawl_name = 'CC-MAIN-2014-15'  # take a small crawl for testing
     top_lvl_domain = 'at'
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
     rm_stopwords = False
     # get_files(crawl_name, top_lvl_domain)
     # create_text_corpus(crawl_name, top_lvl_domain)
-    preprocess_text_corpus(crawl_dir, rm_stopwords)
-    train_model(crawl_dir, rm_stopwords)
-    evaluate_model(crawl_dir, rm_stopwords)
+    # preprocess_text_corpus(crawl_dir, rm_stopwords)
+    preprocess_text_corpus_udpipe(crawl_dir)
+    # train_model(crawl_dir, rm_stopwords)
+    # evaluate_model(crawl_dir, rm_stopwords)
     print("Execution ran for", round((time.time() - t) / 60, 2), "minutes.")
