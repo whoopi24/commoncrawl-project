@@ -15,6 +15,13 @@ from urllib.request import urlretrieve
 # check availability of nltk resources
 import nltk
 import spacy_udpipe
+import spacy
+
+# download spacy german language models in terminal
+# python -m spacy download de_core_news_sm
+# python -m spacy download de_core_news_md
+# python -m spacy download de_core_news_lg
+
 from spacy.tokenizer import Tokenizer
 from HanTa import HanoverTagger as ht
 from gensim.models import Word2Vec
@@ -205,7 +212,7 @@ def preprocess_text_corpus_udpipe(crawl_dir):
         # it's probably safe to increase the `nlp.max_length` limit. The limit is in number of characters,
         # so you can check whether your inputs are too long by checking `len(text)`.
         if n > 1000000:
-            nlp.max_length = n
+            nlp.max_length = n # or preprocessing
 
         # use udpipe model
         doc = nlp(text)
@@ -228,7 +235,67 @@ def preprocess_text_corpus_udpipe(crawl_dir):
         pickle.dump(final_sent, save_pickle)
 
 
-def preprocess_text_corpus(crawl_dir, rm_stopwords=False):
+def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
+    # ToDo: remove _test
+    input_fname = os.path.join(crawl_dir, "text_corpus_test.txt")
+    nlp = spacy.load(spacy_model)
+    german_words = set(nlp.vocab.strings)
+
+    # Pre-compile regular expressions
+    pattern1 = re.compile(r'(http|ftp|https)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])')
+    pattern2 = re.compile(r'<[^>]+>')
+    pattern3 = re.compile(r'\[([^]]+)]')
+
+    with open(input_fname, "rt", encoding="utf-8") as input_file:
+        final_sent = []
+        last_line = None
+        t = time.time()
+        iter = 0
+
+        for line in input_file:
+            iter += 1
+            # print progress
+            if iter % 500 == 0:
+                print(iter)
+
+            # ignore very short lines, e.g. single words
+            if len(line) < 50:
+                continue
+
+            # remove URLs and HTML tags
+            cleaned_line = line
+            for pattern in [pattern1, pattern2, pattern3]:
+                cleaned_line = pattern.sub("", cleaned_line)
+
+            # sentence tokenization
+            sentences = nltk.sent_tokenize(cleaned_line)
+
+            # further pre-processing steps
+            for sent in sentences:
+                # lemmatization and remove punctuation and long 'words'
+                final_line = ' '.join([token.lemma_ for token in nlp(sent)
+                                       if token.is_alpha
+                                       and len(token) < 16
+                                       and token.lemma_ in german_words # ToDo: not sure about this ... sentences become weird
+                                       ])
+                # remove duplicated sequential lines
+                if final_line == last_line:
+                    continue
+                # append list
+                final_sent.append(final_line)
+                last_line = final_line
+
+                #print(final_line)
+
+    print('Time to pre-process text: {} minutes'.format(round((time.time() - t) / 60, 2)))
+
+    # save list of tokenized sentences as pickle
+    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_spacy")
+    with open(pickle_fname, "wb") as save_pickle:
+        pickle.dump(final_sent, save_pickle)
+
+
+def preprocess_text_corpus(crawl_dir):
     # ToDo: change fname to "text_corpus.txt"
     input_fname = os.path.join(crawl_dir, "text_corpus_test.txt")
     tagger_de = ht.HanoverTagger('morphmodel_ger.pgz')
@@ -237,9 +304,6 @@ def preprocess_text_corpus(crawl_dir, rm_stopwords=False):
     pattern1 = re.compile(r'(http|ftp|https)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])')
     pattern2 = re.compile(r'<[^>]+>')
     pattern3 = re.compile(r'\[([^]]+)]')
-
-    # usage of sets for faster membership checks
-    stop_words = set(nltk.corpus.stopwords.words('german'))
 
     with open(input_fname, "rt", encoding="utf-8") as input_file:
         final_sent = []
@@ -272,9 +336,6 @@ def preprocess_text_corpus(crawl_dir, rm_stopwords=False):
                 # remove punctuation and long 'words'
                 filtered_tok = [token.strip() for token in line_tok
                                 if token not in string.punctuation and len(token) < 16]
-                # optional stopwords removal
-                if rm_stopwords:
-                    filtered_tok = [token for token in filtered_tok if token not in stop_words]
                 # lemmatization
                 final_line = [lemma for (word, lemma, pos) in tagger_de.tag_sent(filtered_tok)]
                 # remove duplicated sequential lines
@@ -287,16 +348,16 @@ def preprocess_text_corpus(crawl_dir, rm_stopwords=False):
     print('Time to pre-process text: {} minutes'.format(round((time.time() - t) / 60, 2)))
 
     # save list of tokenized sentences as pickle
-    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_sw_removal_" + str(rm_stopwords))
+    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed")
     with open(pickle_fname, "wb") as save_pickle:
         pickle.dump(final_sent, save_pickle)
 
 
-def train_model(crawl_dir, rm_stopwords=False):
+def train_model(crawl_dir):
     cores = multiprocessing.cpu_count()  # number of cores in computer
 
     # load preprocessed data
-    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_sw_removal_" + str(rm_stopwords))
+    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_spacy")
     with open(pickle_fname, "rb") as load_pickle:
         sentences = pickle.load(load_pickle)
 
@@ -308,7 +369,9 @@ def train_model(crawl_dir, rm_stopwords=False):
                      alpha=0.03,
                      min_alpha=0.0007,
                      negative=20,
-                     workers=cores - 1)
+                     workers=cores - 1,
+                     sg=1                # skip-gram model (default: CBOW)
+                     )
 
     t = time.time()
     model.build_vocab(sentences, progress_per=10000)
@@ -319,13 +382,13 @@ def train_model(crawl_dir, rm_stopwords=False):
     print('Time to train the model: {} minutes'.format(round((time.time() - t) / 60, 2)))
 
     # save model
-    model_fname = os.path.join(crawl_dir, "word2vec_sw_removal_" + str(rm_stopwords) + ".model")
+    model_fname = os.path.join(crawl_dir, "word2vec.model")
     model.save(model_fname)
 
 
-def evaluate_model(crawl_dir, rm_stopwords=False):
+def evaluate_model(crawl_dir):
     # load model
-    model_fname = os.path.join(crawl_dir, "word2vec_sw_removal_" + str(rm_stopwords) + ".model")
+    model_fname = os.path.join(crawl_dir, "word2vec.model")
     model = Word2Vec.load(model_fname)
 
     # validate word sets of target words
@@ -344,11 +407,21 @@ if __name__ == '__main__':
     crawl_name = 'CC-MAIN-2014-15'  # take a small crawl for testing
     top_lvl_domain = 'at'
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
-    rm_stopwords = False
+
+    # check target words
+    spacy_model = 'de_core_news_sm'
+    nlp = spacy.load(spacy_model)
+    vocab = set(nlp.vocab.strings)
+    target_words = ['angreifen', 'anfassen', 'anlangen']
+    for word in target_words:
+        if word not in vocab:
+            raise ValueError(f"'{word}' is not in spacy '{spacy_model}' vocabulary!")
+
     # get_files(crawl_name, top_lvl_domain)
     # create_text_corpus(crawl_name, top_lvl_domain)
-    # preprocess_text_corpus(crawl_dir, rm_stopwords)
-    preprocess_text_corpus_udpipe(crawl_dir)
-    # train_model(crawl_dir, rm_stopwords)
-    # evaluate_model(crawl_dir, rm_stopwords)
+    # preprocess_text_corpus(crawl_dir)
+    preprocess_text_corpus_spacy(crawl_dir, spacy_model)
+    # preprocess_text_corpus_udpipe(crawl_dir)
+    # train_model(crawl_dir)
+    # evaluate_model(crawl_dir)
     print("Execution ran for", round((time.time() - t) / 60, 2), "minutes.")
