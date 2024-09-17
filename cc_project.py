@@ -11,6 +11,7 @@ import string
 import time
 from collections import Counter
 from urllib.request import urlretrieve
+from itertools import product
 
 # check availability of nltk resources
 import nltk
@@ -23,7 +24,7 @@ import spacy
 # python -m spacy download de_core_news_lg
 
 from spacy.tokenizer import Tokenizer
-from HanTa import HanoverTagger as ht
+# from HanTa import HanoverTagger as ht
 from gensim.models import Word2Vec
 from warcio import ArchiveIterator
 
@@ -236,8 +237,7 @@ def preprocess_text_corpus_udpipe(crawl_dir):
 
 
 def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
-    # ToDo: remove _test
-    input_fname = os.path.join(crawl_dir, "text_corpus_test.txt")
+    input_fname = os.path.join(crawl_dir, "text_corpus.txt")
     nlp = spacy.load(spacy_model)
     german_words = set(nlp.vocab.strings)
 
@@ -273,13 +273,16 @@ def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
             # further pre-processing steps
             for sent in sentences:
                 # lemmatization and remove punctuation and long 'words'
-                final_line = ' '.join([token.lemma_ for token in nlp(sent)
-                                       if token.is_alpha
-                                       and len(token) < 16
-                                       and token.lemma_ in german_words # ToDo: not sure about this ... sentences become weird
-                                       ])
+                final_line = [token.lemma_ for token in nlp(sent)
+                              if token.is_alpha
+                              and len(token) < 16
+                              and token.lemma_ in german_words # ToDo: not sure about this ... sentences become weird
+                              ]
                 # remove duplicated sequential lines
                 if final_line == last_line:
+                    continue
+                # remove short sentences (less than 5 words)
+                if len(final_line) < 5:
                     continue
                 # append list
                 final_sent.append(final_line)
@@ -361,6 +364,9 @@ def train_model(crawl_dir):
     with open(pickle_fname, "rb") as load_pickle:
         sentences = pickle.load(load_pickle)
 
+    #print(sentences)
+    #raise NotImplementedError()
+
     # ToDo: parameter tuning of word2vec arguments
     model = Word2Vec(min_count=5,
                      window=5,
@@ -382,14 +388,16 @@ def train_model(crawl_dir):
     print('Time to train the model: {} minutes'.format(round((time.time() - t) / 60, 2)))
 
     # save model
-    model_fname = os.path.join(crawl_dir, "word2vec.model")
+    model_fname = os.path.join(crawl_dir, "word2vec_spacy.model")
     model.save(model_fname)
 
 
 def evaluate_model(crawl_dir):
     # load model
-    model_fname = os.path.join(crawl_dir, "word2vec.model")
+    model_fname = os.path.join(crawl_dir, "word2vec_spacy.model")
     model = Word2Vec.load(model_fname)
+    # check vocab
+    # print(model.wv.key_to_index)
 
     # validate word sets of target words
     target_words = ['angreifen', 'anfassen', 'anlangen']
@@ -397,19 +405,93 @@ def evaluate_model(crawl_dir):
         # ToDo: find out difference btw these fcts - https://stackoverflow.com/questions/50275623/difference-between-most-similar-and-similar-by-vector-in-gensim-word2vec
         # ToDo: mehr Woerter verwenden - 10,20,50,100 ausprobieren
         # w1 = model.wv.most_similar(target, 10)
-        w2 = model.wv.similar_by_word(target, 10)  # seems better
+        w2 = model.wv.similar_by_word(target, 20)  # seems better
         # print(w1)
         print(w2)
 
 
+def jaccard_similarity(list1, list2):
+    intersection = len(list(set(list1).intersection(list2)))
+    union = (len(list1) + len(list2)) - intersection
+    return float(intersection) / union #if union != 0 else 0
+
+
+def compare_w2v_models(crawl_names, top_lvl_domains, target_words, word_cnt=20):
+    combinations = list(product(crawl_names, top_lvl_domains))
+    jaccard_results = {}
+
+    for i in range(len(combinations)):
+        for j in range(i + 1, len(combinations)):
+            comb1 = combinations[i]
+            comb2 = combinations[j]
+            c_dir1 = os.path.join("S:", "msommer", c_name, tld)
+            c_dir2 = os.path.join("S:", "msommer", c_name, tld)
+
+            # load model
+            model_fname1 = os.path.join(c_dir1, "word2vec_spacy.model")
+            model1 = Word2Vec.load(model_fname1)
+            model_fname2 = os.path.join(c_dir2, "word2vec_spacy.model")
+            model2 = Word2Vec.load(model_fname2)
+            set1 = {model1.wv.similar_by_word(word, word_cnt) for word in target_words}
+            set2 = {model2.wv.similar_by_word(word, word_cnt) for word in target_words}
+            jaccard = jaccard_similarity(set1, set2)
+            key1 = f"{comb1[0]}_{comb1[1]}"
+            key2 = f"{comb2[0]}_{comb2[1]}"
+            jaccard_results[(key1, key2)] = jaccard
+
+    return jaccard_results
+
+def compare_w2v_models(type, crawl_names, top_lvl_domains, target_words, word_cnt=20):
+    # check type of comparison
+    type_vec = ['word', 'country', 'time']
+    if type not in type_vec:
+        raise ValueError(f"'{type}' is not correct! Choose between {type_vec}!")
+    elif type == 'word':
+        print("Compare word sets of different target words for same crawl")
+        for c_name in crawl_names:
+            for tld in top_lvl_domains:
+                c_dir = os.path.join("S:", "msommer", c_name, tld)
+
+                # load model
+                model_fname = os.path.join(c_dir, "word2vec_spacy.model")
+                model = Word2Vec.load(model_fname)
+
+                set1 = [a[0] for a in model.wv.similar_by_word('angreifen', word_cnt)]
+                set2 = [a[0] for a in model.wv.similar_by_word('anfassen', word_cnt)]
+                set3 = [a[0] for a in model.wv.similar_by_word('anlangen', word_cnt)]
+                # ToDo: save information of words, years and countries
+                j1 = jaccard_similarity(set1, set2)
+                j2 = jaccard_similarity(set2, set3)
+                j3 = jaccard_similarity(set3, set1)
+
+    elif type == "country":
+        print("Compare word sets of different countries for same target word and year")
+        model_cnt = len(crawl_names) * len(top_lvl_domains)
+        models = list()
+        for c_name in crawl_names:
+            for t_word in ['angreifen', 'anfassen', 'anlangen']:
+                for tld in top_lvl_domains:
+                    c_dir = os.path.join("S:", "msommer", c_name, tld)
+
+                    # load model
+                    model_fname = os.path.join(c_dir, "word2vec_test.model")
+                    model = Word2Vec.load(model_fname)
+
+                    set1 = model.wv.similar_by_word(t_word, word_cnt)
+                    set2 = model.wv.similar_by_word(t_word, word_cnt)
+
+    elif type == "time":
+        print("Compare word sets of different years for same target word and country")
+
+
 if __name__ == '__main__':
     t = time.time()
-    crawl_name = 'CC-MAIN-2014-15'  # take a small crawl for testing
-    top_lvl_domain = 'at'
+    crawl_name = 'CC-MAIN-2013-20'  # take a small crawl for testing
+    top_lvl_domain = 'de'
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
 
     # check target words
-    spacy_model = 'de_core_news_sm'
+    spacy_model = 'de_core_news_lg'
     nlp = spacy.load(spacy_model)
     vocab = set(nlp.vocab.strings)
     target_words = ['angreifen', 'anfassen', 'anlangen']
@@ -420,8 +502,21 @@ if __name__ == '__main__':
     # get_files(crawl_name, top_lvl_domain)
     # create_text_corpus(crawl_name, top_lvl_domain)
     # preprocess_text_corpus(crawl_dir)
-    preprocess_text_corpus_spacy(crawl_dir, spacy_model)
+    #preprocess_text_corpus_spacy(crawl_dir, spacy_model)
     # preprocess_text_corpus_udpipe(crawl_dir)
-    # train_model(crawl_dir)
-    # evaluate_model(crawl_dir)
+    #train_model(crawl_dir)
+    #evaluate_model(crawl_dir)
+
+    # compare several models
+    compare_w2v_models(type='word',
+                       crawl_names=['CC-MAIN-2013-20'],
+                       top_lvl_domains=['de'],
+                       target_words=['angreifen', 'anfassen', 'anlangen'],
+                       word_cnt=20)
     print("Execution ran for", round((time.time() - t) / 60, 2), "minutes.")
+
+    # test Jaccard index
+    set_a = {"Geeks", "for", "Geeks", "NLP", "DSc"}
+    set_b = {"Geek", "for", "Geeks", "DSc.", 'ML', "DSA"}
+    similarity = jaccard_similarity(set_a, set_b)
+    print("Jaccard Similarity:", similarity)
