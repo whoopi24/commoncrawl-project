@@ -11,7 +11,10 @@ import string
 import time
 from collections import Counter
 from urllib.request import urlretrieve
-from itertools import product
+from itertools import product, combinations
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 
 # check availability of nltk resources
 import nltk
@@ -411,37 +414,108 @@ def evaluate_model(crawl_dir):
 
 
 def jaccard_similarity(list1, list2):
-    intersection = len(list(set(list1).intersection(list2)))
-    union = (len(list1) + len(list2)) - intersection
-    return float(intersection) / union #if union != 0 else 0
+    set1, set2 = set(list1), set(list2)  # set conversion for list input
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
+    return intersection / union if union != 0 else 0
 
 
-def compare_w2v_models(crawl_names, top_lvl_domains, target_words, word_cnt=20):
-    combinations = list(product(crawl_names, top_lvl_domains))
-    jaccard_results = {}
+def get_w2v_output(crawl_names, top_lvl_domains, target_words, word_cnt=20):
+    year_tld = list(product(crawl_names, top_lvl_domains))
 
-    for i in range(len(combinations)):
-        for j in range(i + 1, len(combinations)):
-            comb1 = combinations[i]
-            comb2 = combinations[j]
-            c_dir1 = os.path.join("S:", "msommer", c_name, tld)
-            c_dir2 = os.path.join("S:", "msommer", c_name, tld)
+    word_lists = {}
+    for year, tld in year_tld:
+        # load model
+        c_dir = os.path.join("S:", "msommer", year, tld)
+        model_fname = os.path.join(c_dir, "word2vec_spacy.model")
+        model = Word2Vec.load(model_fname)
 
-            # load model
-            model_fname1 = os.path.join(c_dir1, "word2vec_spacy.model")
-            model1 = Word2Vec.load(model_fname1)
-            model_fname2 = os.path.join(c_dir2, "word2vec_spacy.model")
-            model2 = Word2Vec.load(model_fname2)
-            set1 = {model1.wv.similar_by_word(word, word_cnt) for word in target_words}
-            set2 = {model2.wv.similar_by_word(word, word_cnt) for word in target_words}
-            jaccard = jaccard_similarity(set1, set2)
-            key1 = f"{comb1[0]}_{comb1[1]}"
-            key2 = f"{comb2[0]}_{comb2[1]}"
-            jaccard_results[(key1, key2)] = jaccard
+        # get nearest neighbours of target words
+        for word in target_words:
+            key = tuple([year, tld, word])
+            word_lists[key] = [result[0] for result in model.wv.similar_by_word(word, word_cnt)]
+
+    return word_lists
+
+
+def calculate_jaccard_by_dimension(word_sets):
+    years = set([key[0] for key in word_sets.keys()])
+    countries = set([key[1] for key in word_sets.keys()])
+    words = set([key[2] for key in word_sets.keys()])
+    #print(years, countries, words)
+
+    jaccard_results = {'years': [], 'countries': [], 'words': []}
+
+    # comparison by years
+    if len(years) > 1:
+        for word in words:
+            for country in countries:
+                year_pairs = combinations(years, 2)
+                for year1, year2 in year_pairs:
+                    key1 = (year1, country, word)
+                    key2 = (year2, country, word)
+                    if key1 in word_sets and key2 in word_sets:
+                        similarity = jaccard_similarity(word_sets[key1], word_sets[key2])
+                        jaccard_results['years'].append((key1, key2, similarity))
+
+    # comparison by countries
+    if len(countries) > 1:
+        for year in years:
+            for word in words:
+                country_pairs = combinations(countries, 2)
+                for country1, country2 in country_pairs:
+                    key1 = (year, country1, word)
+                    key2 = (year, country2, word)
+                    if key1 in word_sets and key2 in word_sets:
+                        similarity = jaccard_similarity(word_sets[key1], word_sets[key2])
+                        jaccard_results['countries'].append((key1, key2, similarity))
+
+    # comparison by words
+    if len(words) > 1:
+        for year in years:
+            for country in countries:
+                word_pairs = combinations(words, 2)
+                for word1, word2 in word_pairs:
+                    key1 = (year, country, word1)
+                    key2 = (year, country, word2)
+                    if key1 in word_sets and key2 in word_sets:
+                        similarity = jaccard_similarity(word_sets[key1], word_sets[key2])
+                        jaccard_results['words'].append((key1, key2, similarity))
 
     return jaccard_results
 
-def compare_w2v_models(type, crawl_names, top_lvl_domains, target_words, word_cnt=20):
+
+def plot_jaccard_similarity(results, comparison_type):
+    pairs, similarities = [], []
+
+    for entry in results[comparison_type]:
+        pair_label = f"{entry[0]} vs {entry[1]}"
+        pairs.append(pair_label)
+        similarities.append(entry[2])
+
+    # ToDo: if clauses for comparison types
+
+    # Create DataFrame for plotting
+    df = pd.DataFrame({'Pair': pairs, 'Jaccard Similarity': similarities})
+
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x='Pair', y='Jaccard Similarity', data=df)
+    plt.xticks(rotation=90)
+    plt.title(f'Jaccard Similarity: {comparison_type.capitalize()} Comparisons')
+    plt.tight_layout()
+    plt.show()
+
+
+def compare_w2v_models_old(type, crawl_names, top_lvl_domains, target_words, word_cnt=20):
+    jaccard_results = {}
+    #for i in range(len(combinations)):
+     #   for j in range(i + 1, len(combinations)):
+            # key1 = mydict[i]
+            # key2 = mydict[j]
+            #set1 = mydict[key1]
+            #set2 = mydict[key2]
+            #jaccard_results[(key1, key2)] = jaccard_similarity(set1, set2)
+
     # check type of comparison
     type_vec = ['word', 'country', 'time']
     if type not in type_vec:
@@ -507,16 +581,22 @@ if __name__ == '__main__':
     #train_model(crawl_dir)
     #evaluate_model(crawl_dir)
 
-    # compare several models
-    compare_w2v_models(type='word',
-                       crawl_names=['CC-MAIN-2013-20'],
-                       top_lvl_domains=['de'],
-                       target_words=['angreifen', 'anfassen', 'anlangen'],
-                       word_cnt=20)
+    # get word sets
+    output = get_w2v_output(crawl_names=['CC-MAIN-2013-20'],
+                            top_lvl_domains=['de', 'at'],
+                            target_words=['angreifen', 'anfassen', 'anlangen'],
+                            word_cnt=10)
+    print(output)
+
+    # calculate jaccard index
+    ji_results = calculate_jaccard_by_dimension(output)
+    print(ji_results)
+    plot_jaccard_similarity(ji_results, 'countries')
     print("Execution ran for", round((time.time() - t) / 60, 2), "minutes.")
 
     # test Jaccard index
     set_a = {"Geeks", "for", "Geeks", "NLP", "DSc"}
     set_b = {"Geek", "for", "Geeks", "DSc.", 'ML', "DSA"}
+    # 2/8 = 1/4 = 0.25
     similarity = jaccard_similarity(set_a, set_b)
     print("Jaccard Similarity:", similarity)
