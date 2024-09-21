@@ -15,11 +15,9 @@ from itertools import product, combinations
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-from datetime import datetime
-
-# check availability of nltk resources
+from gensim.models import Word2Vec
+from warcio import ArchiveIterator
 import nltk
-import spacy_udpipe
 import spacy
 
 # download spacy german language models in terminal
@@ -27,14 +25,7 @@ import spacy
 # python -m spacy download de_core_news_md
 # python -m spacy download de_core_news_lg
 
-from spacy.tokenizer import Tokenizer
-# from HanTa import HanoverTagger as ht
-from gensim.models import Word2Vec
-from warcio import ArchiveIterator
-
-# download German spacy model
-spacy_udpipe.download("de")
-
+# check availability of nltk resources
 try:
     stop_words = nltk.corpus.stopwords.words('german')
 except LookupError:
@@ -85,15 +76,6 @@ def extract_year_week(year_week_str):
     return f'{year}-{week}'
 
 
-# function to extract year and week from the string and convert to a date
-def convert_to_date(year_week_str):
-    # split the string by '-' and extract the relevant parts
-    year_week = year_week_str.split('-')
-    year = int(year_week[2])  # extract the year
-    week = int(year_week[3])  # extract the week number
-    date = datetime.strptime(f'{year}-W{week}-1', "%Y-W%W-%w")
-    return date
-
 # function to get wet files of specific crawl and for specific top-level domain
 def get_files(crawl_name, top_lvl_domain='at', files_cnt=1000):
     # download cluster.idx file for this crawl
@@ -123,6 +105,7 @@ def get_files(crawl_name, top_lvl_domain='at', files_cnt=1000):
 
     # choose only one cdx file
     if len(cdx_files) > 1:
+        random.seed(24)
         idx = random.sample(range(0, len(cdx_files)), 1)
         cdx_files = [cdx_files[i] for i in idx]
 
@@ -202,6 +185,7 @@ def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=1000):
                             elif pct_cnt / sw_cnt > 1 or lb_cnt / sw_cnt > 0.5:
                                 continue
                             output.write(content)
+            # ToDo: add restriction on file size
             if iter >= files_cnt:
                 break
     print("Text corpus successfully created.")
@@ -209,51 +193,6 @@ def create_text_corpus(crawl_name, top_lvl_domain='at', files_cnt=1000):
 
 
 # function to preprocess text corpus of specific crawl and for specific top-level domain
-def preprocess_text_corpus_udpipe(crawl_dir):
-    # ToDo: change fname to "text_corpus.txt"
-    input_fname = os.path.join(crawl_dir, "text_corpus_test.txt")
-
-    # load German spacy model
-    nlp = spacy_udpipe.load("de")
-
-    with open(input_fname, "rt", encoding="utf-8") as input_file:
-        final_sent = []
-        t = time.time()
-        text = input_file.read()
-        n = len(text)
-
-        # presegmentation (List[str])/pretokenization (List[List[str]])
-        # sentences = nltk.sent_tokenize(text)  -> doesnt work
-
-        # ValueError: [E088] Text of length 2684477 exceeds maximum of 1000000.
-        # The parser and NER models require roughly 1GB of temporary memory per 100,000 characters in the input.
-        # This means long texts may cause memory allocation errors. If you're not using the parser or NER,
-        # it's probably safe to increase the `nlp.max_length` limit. The limit is in number of characters,
-        # so you can check whether your inputs are too long by checking `len(text)`.
-        if n > 1000000:
-            nlp.max_length = n # or preprocessing
-
-        # use udpipe model
-        doc = nlp(text)
-
-        for token in doc:
-            #if token.is_alpha and len(token) < 16:
-            #    filtered_tok = [token.strip() for token in line_tok
-            #                    if token.is_alpha and len(token) < 16]
-
-            print(token.text, token.lemma_, token.pos_, token.tag_, token.dep_, token.shape_, token.is_alpha,
-                  token.is_stop)
-            # append list
-            final_sent.append(token)
-
-    print('Time to pre-process text: {} minutes'.format(round((time.time() - t) / 60, 2)))
-
-    # save list of tokenized sentences as pickle
-    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_udpipe_" + str(rm_stopwords))
-    with open(pickle_fname, "wb") as save_pickle:
-        pickle.dump(final_sent, save_pickle)
-
-
 def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
     input_fname = os.path.join(crawl_dir, "text_corpus.txt")
     nlp = spacy.load(spacy_model)
@@ -293,8 +232,8 @@ def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
                 # lemmatization and remove punctuation and long 'words'
                 final_line = [token.lemma_ for token in nlp(sent)
                               if token.is_alpha
-                              and len(token) < 16
-                              and token.lemma_ in german_words # ToDo: not sure about this ... sentences become weird
+                              and len(token) < 16 # depending on average German word length
+                              #and token.lemma_ in german_words # ToDo: not sure about this ... sentences become weird
                               ]
                 # remove duplicated sequential lines
                 if final_line == last_line:
@@ -311,7 +250,7 @@ def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
     print('Time to pre-process text: {} minutes'.format(round((time.time() - t) / 60, 2)))
 
     # save list of tokenized sentences as pickle
-    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_spacy")
+    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_" + spacy_model)
     with open(pickle_fname, "wb") as save_pickle:
         pickle.dump(final_sent, save_pickle)
 
@@ -374,25 +313,24 @@ def preprocess_text_corpus(crawl_dir):
         pickle.dump(final_sent, save_pickle)
 
 
-def train_model(crawl_dir):
+def train_model(crawl_dir, spacy_model):
     cores = multiprocessing.cpu_count()  # number of cores in computer
 
     # load preprocessed data
-    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_spacy")
+    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed_" + spacy_model)
     with open(pickle_fname, "rb") as load_pickle:
         sentences = pickle.load(load_pickle)
-
-    #print(sentences)
-    #raise NotImplementedError()
 
     # ToDo: parameter tuning of word2vec arguments
     model = Word2Vec(min_count=5,
                      window=5,
+                     # dimensionality of word vectors, mostly 100-300, more linguistic nuance -> computational cost
                      vector_size=100,
                      sample=6e-5,
                      alpha=0.03,
                      min_alpha=0.0007,
-                     negative=20,
+                     epochs=5,           # number of passes over the training data
+                     negative=20,        # number of negative samples for noise-contrastive training
                      workers=cores - 1,
                      sg=1                # skip-gram model (default: CBOW)
                      )
@@ -410,24 +348,6 @@ def train_model(crawl_dir):
     model.save(model_fname)
 
 
-def evaluate_model(crawl_dir):
-    # load model
-    model_fname = os.path.join(crawl_dir, "word2vec_spacy.model")
-    model = Word2Vec.load(model_fname)
-    # check vocab
-    # print(model.wv.key_to_index)
-
-    # validate word sets of target words
-    target_words = ['angreifen', 'anfassen', 'anlangen']
-    for target in target_words:
-        # ToDo: find out difference btw these fcts - https://stackoverflow.com/questions/50275623/difference-between-most-similar-and-similar-by-vector-in-gensim-word2vec
-        # ToDo: mehr Woerter verwenden - 10,20,50,100 ausprobieren
-        # w1 = model.wv.most_similar(target, 10)
-        w2 = model.wv.similar_by_word(target, 20)  # seems better
-        # print(w1)
-        print(w2)
-
-
 def jaccard_similarity(list1, list2):
     set1, set2 = set(list1), set(list2)  # set conversion for list input
     intersection = len(set1 & set2)
@@ -437,7 +357,6 @@ def jaccard_similarity(list1, list2):
 
 def get_w2v_output(crawl_names, top_lvl_domains, target_words, word_cnt=20):
     year_tld = list(product(crawl_names, top_lvl_domains))
-
     word_lists = {}
     for year, tld in year_tld:
         # load model
@@ -448,17 +367,18 @@ def get_w2v_output(crawl_names, top_lvl_domains, target_words, word_cnt=20):
         # get nearest neighbours of target words
         for word in target_words:
             key = tuple([extract_year_week(year), tld, word])
+            # https://stackoverflow.com/questions/50275623/difference-between-most-similar-and-similar-by-vector-in-gensim-word2vec
             word_lists[key] = [result[0] for result in model.wv.similar_by_word(word, word_cnt)]
 
     return word_lists
 
 
-def calculate_jaccard_by_dimension(word_sets):
+def calculate_jaccard_similarity(word_sets):
     years = set([key[0] for key in word_sets.keys()])
     countries = set([key[1] for key in word_sets.keys()])
     words = set([key[2] for key in word_sets.keys()])
-    #print(years, countries, words)
 
+    # ToDo: remove jaccard_results - not necessary
     jaccard_results = {'years': [], 'countries': [], 'words': []}
     jaccard_list = []
 
@@ -572,7 +492,7 @@ if __name__ == '__main__':
     crawl_dir = os.path.join("S:", "msommer", crawl_name, top_lvl_domain)
 
     # check target words
-    spacy_model = 'de_core_news_lg'
+    spacy_model = 'de_core_news_md'
     nlp = spacy.load(spacy_model)
     vocab = set(nlp.vocab.strings)
     target_words = ['angreifen', 'anfassen', 'anlangen']
@@ -580,46 +500,41 @@ if __name__ == '__main__':
         if word not in vocab:
             raise ValueError(f"'{word}' is not in spacy '{spacy_model}' vocabulary!")
 
-    # get_files(crawl_name, top_lvl_domain)
-    # create_text_corpus(crawl_name, top_lvl_domain)
+    get_files(crawl_name, top_lvl_domain)
+    create_text_corpus(crawl_name, top_lvl_domain)
     # preprocess_text_corpus(crawl_dir)
-    #preprocess_text_corpus_spacy(crawl_dir, spacy_model)
-    # preprocess_text_corpus_udpipe(crawl_dir)
-    #train_model(crawl_dir)
-    #evaluate_model(crawl_dir)
+    preprocess_text_corpus_spacy(crawl_dir, spacy_model)
+    train_model(crawl_dir, spacy_model)
 
     # get word sets
-    output = get_w2v_output(crawl_names=['CC-MAIN-2013-20'],
-                            top_lvl_domains=['de', 'at'],
-                            target_words=['angreifen', 'anfassen', 'anlangen'],
-                            word_cnt=10)
-    #print(output)
+    # ToDo: try word_cnt = 10,20,50,100
+    #output = get_w2v_output(crawl_names=['CC-MAIN-2013-20'], top_lvl_domains=['de', 'at'],
+    #                        target_words=['angreifen', 'anfassen', 'anlangen'], word_cnt=10)
 
     # calculate jaccard index
-    results, jaccard_df = calculate_jaccard_by_dimension(output)
-    print(results)
-    plot_jaccard_similarity(jaccard_df, 'countries')
+    #results, jaccard_df = calculate_jaccard_similarity(output)
+
+    # Plot for 'years' comparison
+    #plot_jaccard_similarity(jaccard_df, 'years')
+
+    # Plot for 'countries' comparison
+    #plot_jaccard_similarity(jaccard_df, 'countries')
+
+    # Plot for 'words' comparison
+    #plot_jaccard_similarity(jaccard_df, 'words')
+
     print("Execution ran for", round((time.time() - t) / 60, 2), "minutes.")
 
-    # Example word sets dictionary
-    #word_sets = {
+    # tests
+    # example word sets dictionary
+    # word_sets = {
     #    (2020, 'country1', 'word1'): ['a', 'b', 'c'],
     #    (2020, 'country1', 'word2'): ['a', 'b', 'e'],
     #    (2020, 'country2', 'word1'): ['a', 'd', 'f'],
     #    (2021, 'country1', 'word1'): ['a', 'c', 'g'],
     #    (2021, 'country2', 'word1'): ['a', 'b', 'h'],
-    #}
+    # }
 
     # Compute Jaccard similarities and get the DataFrame
-    #jaccard_results, jaccard_df = calculate_jaccard_by_dimension(word_sets)
-    #print(jaccard_df)
-
-    # Plot for 'years' comparison
-    plot_jaccard_similarity(jaccard_df, 'years')
-
-    # Plot for 'countries' comparison
-    plot_jaccard_similarity(jaccard_df, 'countries')
-
-    # Plot for 'words' comparison
-    plot_jaccard_similarity(jaccard_df, 'words')
-
+    # jaccard_results, jaccard_df = calculate_jaccard_by_dimension(word_sets)
+    # print(jaccard_df)
