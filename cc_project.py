@@ -15,6 +15,7 @@ from itertools import product, combinations
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+from datetime import datetime
 
 # check availability of nltk resources
 import nltk
@@ -47,10 +48,6 @@ except LookupError:
     nltk.download('punkt')
 
 
-# import pandas as pd
-# import numpy as np
-
-
 # function to count punctuation markers, stopwords and line breaks
 def count_pct_and_stopwords(text, stopwords):
     pct_count = 0
@@ -78,6 +75,24 @@ def tryDownload(url, filename, retries=0):
         time.sleep(1)
         tryDownload(url, filename, retries + 1)
 
+
+# function to extract the year and week from the string
+def extract_year_week(year_week_str):
+    # Split the string by '-' and extract the relevant parts
+    year_week = year_week_str.split('-')
+    year = int(year_week[2])
+    week = int(year_week[3])
+    return f'{year}-{week}'
+
+
+# function to extract year and week from the string and convert to a date
+def convert_to_date(year_week_str):
+    # split the string by '-' and extract the relevant parts
+    year_week = year_week_str.split('-')
+    year = int(year_week[2])  # extract the year
+    week = int(year_week[3])  # extract the week number
+    date = datetime.strptime(f'{year}-W{week}-1', "%Y-W%W-%w")
+    return date
 
 # function to get wet files of specific crawl and for specific top-level domain
 def get_files(crawl_name, top_lvl_domain='at', files_cnt=1000):
@@ -432,7 +447,7 @@ def get_w2v_output(crawl_names, top_lvl_domains, target_words, word_cnt=20):
 
         # get nearest neighbours of target words
         for word in target_words:
-            key = tuple([year, tld, word])
+            key = tuple([extract_year_week(year), tld, word])
             word_lists[key] = [result[0] for result in model.wv.similar_by_word(word, word_cnt)]
 
     return word_lists
@@ -445,6 +460,7 @@ def calculate_jaccard_by_dimension(word_sets):
     #print(years, countries, words)
 
     jaccard_results = {'years': [], 'countries': [], 'words': []}
+    jaccard_list = []
 
     # comparison by years
     if len(years) > 1:
@@ -457,6 +473,7 @@ def calculate_jaccard_by_dimension(word_sets):
                     if key1 in word_sets and key2 in word_sets:
                         similarity = jaccard_similarity(word_sets[key1], word_sets[key2])
                         jaccard_results['years'].append((key1, key2, similarity))
+                        jaccard_list.append([year1, year2, country, country, word, word, similarity])
 
     # comparison by countries
     if len(countries) > 1:
@@ -469,6 +486,7 @@ def calculate_jaccard_by_dimension(word_sets):
                     if key1 in word_sets and key2 in word_sets:
                         similarity = jaccard_similarity(word_sets[key1], word_sets[key2])
                         jaccard_results['countries'].append((key1, key2, similarity))
+                        jaccard_list.append([year, year, country1, country2, word, word, similarity])
 
     # comparison by words
     if len(words) > 1:
@@ -481,81 +499,70 @@ def calculate_jaccard_by_dimension(word_sets):
                     if key1 in word_sets and key2 in word_sets:
                         similarity = jaccard_similarity(word_sets[key1], word_sets[key2])
                         jaccard_results['words'].append((key1, key2, similarity))
+                        jaccard_list.append([year, year, country, country, word1, word2, similarity])
 
-    return jaccard_results
+    # create dataframe with all comparisons
+    jaccard_df = pd.DataFrame(jaccard_list, columns=[
+        'year1', 'year2', 'country1', 'country2', 'word1', 'word2', 'jaccard_idx'
+    ])
+
+    return jaccard_results, jaccard_df
 
 
-def plot_jaccard_similarity(results, comparison_type):
-    pairs, similarities = [], []
-
-    for entry in results[comparison_type]:
-        pair_label = f"{entry[0]} vs {entry[1]}"
-        pairs.append(pair_label)
-        similarities.append(entry[2])
-
-    # ToDo: if clauses for comparison types
-
-    # Create DataFrame for plotting
-    df = pd.DataFrame({'Pair': pairs, 'Jaccard Similarity': similarities})
-
+def plot_jaccard_similarity(jaccard_df, comparison_type):
+    # plot figure
     plt.figure(figsize=(10, 6))
-    sns.barplot(x='Pair', y='Jaccard Similarity', data=df)
-    plt.xticks(rotation=90)
-    plt.title(f'Jaccard Similarity: {comparison_type.capitalize()} Comparisons')
-    plt.tight_layout()
-    plt.show()
-
-
-def compare_w2v_models_old(type, crawl_names, top_lvl_domains, target_words, word_cnt=20):
-    jaccard_results = {}
-    #for i in range(len(combinations)):
-     #   for j in range(i + 1, len(combinations)):
-            # key1 = mydict[i]
-            # key2 = mydict[j]
-            #set1 = mydict[key1]
-            #set2 = mydict[key2]
-            #jaccard_results[(key1, key2)] = jaccard_similarity(set1, set2)
 
     # check type of comparison
-    type_vec = ['word', 'country', 'time']
-    if type not in type_vec:
+    type_vec = ['words', 'countries', 'years']
+    if comparison_type not in type_vec:
         raise ValueError(f"'{type}' is not correct! Choose between {type_vec}!")
-    elif type == 'word':
-        print("Compare word sets of different target words for same crawl")
-        for c_name in crawl_names:
-            for tld in top_lvl_domains:
-                c_dir = os.path.join("S:", "msommer", c_name, tld)
+    elif comparison_type == 'words':
+        print("Compare word sets of different target words")
+        df = jaccard_df[
+            (jaccard_df['year1'] == jaccard_df['year2']) &
+            (jaccard_df['country1'] == jaccard_df['country2']) &
+            (jaccard_df['word1'] != jaccard_df['word2'])]
+        ax = sns.lineplot(
+            x='year1', y='jaccard_idx', hue='country1', data=df, marker="o", palette="deep", errorbar='sd'
+        )
+        # specify axis labels
+        ax.set(xlabel='year',
+               ylabel='jaccard similarity')
+        ax.legend(title='country')
 
-                # load model
-                model_fname = os.path.join(c_dir, "word2vec_spacy.model")
-                model = Word2Vec.load(model_fname)
+    elif comparison_type == "countries":
+        print("Compare word sets of different countries")    # for same target word and year
+        df = jaccard_df[
+            (jaccard_df['year1'] == jaccard_df['year2']) &
+            (jaccard_df['country1'] != jaccard_df['country2']) &
+            (jaccard_df['word1'] == jaccard_df['word2'])]
+        ax = sns.lineplot(
+            x='year1', y='jaccard_idx', hue='word1', data=df, marker="o", palette="deep", errorbar='sd'
+        )
+        # specify axis labels
+        ax.set(xlabel='year',
+               ylabel='jaccard similarity')
+        ax.legend(title='target words')
 
-                set1 = [a[0] for a in model.wv.similar_by_word('angreifen', word_cnt)]
-                set2 = [a[0] for a in model.wv.similar_by_word('anfassen', word_cnt)]
-                set3 = [a[0] for a in model.wv.similar_by_word('anlangen', word_cnt)]
-                # ToDo: save information of words, years and countries
-                j1 = jaccard_similarity(set1, set2)
-                j2 = jaccard_similarity(set2, set3)
-                j3 = jaccard_similarity(set3, set1)
+    elif comparison_type == "years":
+        print("Compare word sets of different years")        # for same target word and country
+        df = jaccard_df[
+            (jaccard_df['year1'] != jaccard_df['year2']) &
+            (jaccard_df['country1'] == jaccard_df['country2']) &
+            (jaccard_df['word1'] == jaccard_df['word2'])]
+        ax = sns.lineplot(
+            x='word1', y='jaccard_idx', hue='country1', data=df, marker="o", palette="deep", errorbar='sd'
+        )
+        # specify axis labels
+        ax.set(xlabel='target words',
+               ylabel='jaccard similarity')
+        ax.legend(title='country')
 
-    elif type == "country":
-        print("Compare word sets of different countries for same target word and year")
-        model_cnt = len(crawl_names) * len(top_lvl_domains)
-        models = list()
-        for c_name in crawl_names:
-            for t_word in ['angreifen', 'anfassen', 'anlangen']:
-                for tld in top_lvl_domains:
-                    c_dir = os.path.join("S:", "msommer", c_name, tld)
-
-                    # load model
-                    model_fname = os.path.join(c_dir, "word2vec_test.model")
-                    model = Word2Vec.load(model_fname)
-
-                    set1 = model.wv.similar_by_word(t_word, word_cnt)
-                    set2 = model.wv.similar_by_word(t_word, word_cnt)
-
-    elif type == "time":
-        print("Compare word sets of different years for same target word and country")
+    plt.title(f'Jaccard Similarity ({comparison_type.capitalize()} Comparisons)')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == '__main__':
@@ -586,17 +593,33 @@ if __name__ == '__main__':
                             top_lvl_domains=['de', 'at'],
                             target_words=['angreifen', 'anfassen', 'anlangen'],
                             word_cnt=10)
-    print(output)
+    #print(output)
 
     # calculate jaccard index
-    ji_results = calculate_jaccard_by_dimension(output)
-    print(ji_results)
-    plot_jaccard_similarity(ji_results, 'countries')
+    results, jaccard_df = calculate_jaccard_by_dimension(output)
+    print(results)
+    plot_jaccard_similarity(jaccard_df, 'countries')
     print("Execution ran for", round((time.time() - t) / 60, 2), "minutes.")
 
-    # test Jaccard index
-    set_a = {"Geeks", "for", "Geeks", "NLP", "DSc"}
-    set_b = {"Geek", "for", "Geeks", "DSc.", 'ML', "DSA"}
-    # 2/8 = 1/4 = 0.25
-    similarity = jaccard_similarity(set_a, set_b)
-    print("Jaccard Similarity:", similarity)
+    # Example word sets dictionary
+    #word_sets = {
+    #    (2020, 'country1', 'word1'): ['a', 'b', 'c'],
+    #    (2020, 'country1', 'word2'): ['a', 'b', 'e'],
+    #    (2020, 'country2', 'word1'): ['a', 'd', 'f'],
+    #    (2021, 'country1', 'word1'): ['a', 'c', 'g'],
+    #    (2021, 'country2', 'word1'): ['a', 'b', 'h'],
+    #}
+
+    # Compute Jaccard similarities and get the DataFrame
+    #jaccard_results, jaccard_df = calculate_jaccard_by_dimension(word_sets)
+    #print(jaccard_df)
+
+    # Plot for 'years' comparison
+    plot_jaccard_similarity(jaccard_df, 'years')
+
+    # Plot for 'countries' comparison
+    plot_jaccard_similarity(jaccard_df, 'countries')
+
+    # Plot for 'words' comparison
+    plot_jaccard_similarity(jaccard_df, 'words')
+
