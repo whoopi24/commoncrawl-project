@@ -122,8 +122,13 @@ def get_files(crawl_dir, crawl_name, top_lvl_domain='at', files_cnt=500, skip=Fa
                 if match:
                     l = line.split("{\"url\":")
                     string = "{\"url\":" + l[1]
-                    d = json.loads(string)
-                    warc = d["filename"]
+                    try:
+                        d = json.loads(string)
+                        warc = d["filename"]
+                    except:
+                        print("Problem with decoding .. skip file")
+                        continue
+
                     if int(d["length"]) > 10000:
                         warc_files.append(warc)
             # order dict by most common wet files (descending order of value)
@@ -248,63 +253,6 @@ def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
         pickle.dump(final_sent, save_pickle)
 
 
-def preprocess_text_corpus_old(crawl_dir):
-    input_fname = os.path.join(crawl_dir, "text_corpus.txt")
-    tagger_de = ht.HanoverTagger('morphmodel_ger.pgz')
-
-    # Pre-compile regular expressions
-    pattern1 = re.compile(r'(http|ftp|https)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])')
-    pattern2 = re.compile(r'<[^>]+>')
-    pattern3 = re.compile(r'\[([^]]+)]')
-
-    with open(input_fname, "rt", encoding="utf-8") as input_file:
-        final_sent = []
-        last_line = None
-        t = time.time()
-        iter = 0
-
-        for line in input_file:
-            iter += 1
-            # print progress
-            if iter % 500 == 0:
-                print(iter)
-
-            # ignore very short lines, e.g. single words
-            if len(line) < 50:
-                continue
-
-            # remove URLs and HTML tags
-            cleaned_line = line
-            for pattern in [pattern1, pattern2, pattern3]:
-                cleaned_line = pattern.sub("", cleaned_line)
-
-            # sentence tokenization
-            sentences = nltk.sent_tokenize(cleaned_line)
-
-            # further pre-processing steps
-            for sent in sentences:
-                # word tokenization
-                line_tok = sent.split()  # line_tok = nltk.word_tokenize(sent)
-                # remove punctuation and long 'words'
-                filtered_tok = [token.strip() for token in line_tok
-                                if token not in string.punctuation and len(token) < 16]
-                # lemmatization
-                final_line = [lemma for (word, lemma, pos) in tagger_de.tag_sent(filtered_tok)]
-                # remove duplicated sequential lines
-                if final_line == last_line:
-                    continue
-                # append list
-                final_sent.append(final_line)
-                last_line = final_line
-
-    print('Time to pre-process text: {} minutes'.format(round((time.time() - t) / 60, 2)))
-
-    # save list of tokenized sentences as pickle
-    pickle_fname = os.path.join(crawl_dir, "text_corpus_processed")
-    with open(pickle_fname, "wb") as save_pickle:
-        pickle.dump(final_sent, save_pickle)
-
-
 def train_model(crawl_dir, spacy_model):
     cores = multiprocessing.cpu_count()  # number of cores in computer
 
@@ -378,7 +326,6 @@ if __name__ == '__main__':
     # start program
     t = time.time()
     get_files(crawl_dir, crawl_name, top_lvl_domain, files_cnt)
-    # get_files(crawl_dir, crawl_name, top_lvl_domain, files_cnt, skip=True)
     create_text_corpus(crawl_dir, top_lvl_domain)
     preprocess_text_corpus_spacy(crawl_dir, spacy_model)
     train_model(crawl_dir, spacy_model)

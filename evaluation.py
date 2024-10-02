@@ -200,7 +200,7 @@ def plot_jaccard_similarity(jaccard_df, comparison_type, word_cnt=20):
 if __name__ == '__main__':
     # set arguments
     data_path = os.path.join("S:", "msommer")
-    crawls = ['CC-MAIN-2014-00', 'CC-MAIN-2024-38']
+    crawls = ['CC-MAIN-2014-00', 'CC-MAIN-2019-35', 'CC-MAIN-2024-38']
     tlds = ['at', 'de']
     target_words = ['angreifen', 'anfassen', 'anlangen']
     spacy_model = 'de_core_news_md'
@@ -227,7 +227,7 @@ if __name__ == '__main__':
     plot_jaccard_similarity(jaccard_df, 'countries', word_cnt)
 
     # plot for 'words' comparison
-    # plot_jaccard_similarity(jaccard_df, 'words', word_cnt)
+    plot_jaccard_similarity(jaccard_df, 'words', word_cnt)
 
     # tests
     # example word sets dictionary
