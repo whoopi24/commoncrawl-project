@@ -183,7 +183,6 @@ def create_text_corpus(crawl_dir, top_lvl_domain='at', files_cnt=1000):
                                 elif pct_cnt / sw_cnt > 1 or lb_cnt / sw_cnt > 0.5:
                                     continue
                                 output.write(content)
-                # ToDo: add restriction on file size
                 if iter >= files_cnt:
                     break
     print("Text corpus successfully created.")
@@ -194,7 +193,7 @@ def create_text_corpus(crawl_dir, top_lvl_domain='at', files_cnt=1000):
 def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
     input_fname = os.path.join(crawl_dir, "text_corpus.txt")
     nlp = spacy.load(spacy_model)
-    german_words = set(nlp.vocab.strings)
+    # german_words = set(nlp.vocab.strings)
 
     # Pre-compile regular expressions
     pattern1 = re.compile(r'(http|ftp|https)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])')
@@ -230,8 +229,8 @@ def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
                 # lemmatization and remove punctuation and long 'words'
                 final_line = [token.lemma_ for token in nlp(sent)
                               if token.is_alpha
-                              and len(token) < 16 # depending on average German word length
-                              #and token.lemma_ in german_words # ToDo: not sure about this ... sentences become weird
+                              and len(token) < 16   # depending on average German word length
+                              # and token.lemma_ in german_words
                               ]
                 # remove duplicated sequential lines
                 if final_line == last_line:
@@ -243,7 +242,7 @@ def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
                 final_sent.append(final_line)
                 last_line = final_line
 
-                #print(final_line)
+                # print(final_line)
 
     print('Time to pre-process text: {} minutes'.format(round((time.time() - t) / 60, 2)))
 
@@ -253,6 +252,7 @@ def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
         pickle.dump(final_sent, save_pickle)
 
 
+# function to train a word2vec model
 def train_model(crawl_dir, spacy_model):
     cores = multiprocessing.cpu_count()  # number of cores in computer
 
@@ -287,6 +287,7 @@ def train_model(crawl_dir, spacy_model):
     model.save(model_fname)
 
 
+# function for using arguments when running the file
 def get_args():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument(
@@ -318,7 +319,7 @@ if __name__ == '__main__':
     spacy_model = 'de_core_news_md'
     nlp = spacy.load(spacy_model)
     vocab = set(nlp.vocab.strings)
-    target_words = ['angreifen', 'anfassen', 'anlangen']
+    target_words = ['anfassen', 'angreifen', 'anlangen']
     for word in target_words:
         if word not in vocab:
             raise ValueError(f"'{word}' is not in spacy '{spacy_model}' vocabulary!")
