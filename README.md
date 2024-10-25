@@ -9,9 +9,9 @@ This project consists of the following files:
 - train.py
 - evaluation.py
 - requirements.txt
-- ReadMe.md
+- README.md
 
-If you want to know how to run this project in `Python`, go to the end of this file.
+If you want to know how to run this project in `Python`, go to the end of this file. There is also a written report about my project available named `report.pdf`.
 
 Since natural language develops at any time, the aim of this project is to find out if the usage
 of the German touch verbs “anfassen”, “angreifen” and “anlangen” has changed over the last
