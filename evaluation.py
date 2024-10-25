@@ -30,11 +30,13 @@ def jaccard_similarity(list1, list2):
     set1, set2 = set(list1), set(list2)  # set conversion for list input
     intersection = len(set1 & set2)
     union = len(set1 | set2)
+    if intersection > 0:
+        print(f"Common words are: {set1.intersection(set2)}")
     return intersection / union if union != 0 else 0
 
 
 # function to get the word sets with the nearest neighbours of the word2vec models
-def get_w2v_output(data_path, crawl_names, top_lvl_domains, target_words, spacy_model, word_cnt=20):
+def get_w2v_output(data_path, crawl_names, top_lvl_domains, target_words, spacy_model, word_cnt=100):
     year_tld = list(product(crawl_names, top_lvl_domains))
     word_lists = {}
     for year, tld in year_tld:
@@ -69,6 +71,8 @@ def calculate_jaccard_similarity(word_sets):
                     key2 = (year2, country, word)
                     if key1 in word_sets and key2 in word_sets:
                         similarity = jaccard_similarity(word_sets[key1], word_sets[key2])
+                        if similarity > 0:
+                            print(f"between the word sets of {key1} and {key2}")
                         jaccard_list.append([year1, year2, country, country, word, word, similarity])
 
     # comparison by countries
@@ -81,19 +85,9 @@ def calculate_jaccard_similarity(word_sets):
                     key2 = (year, country2, word)
                     if key1 in word_sets and key2 in word_sets:
                         similarity = jaccard_similarity(word_sets[key1], word_sets[key2])
+                        if similarity > 0:
+                            print(f"between the word sets of {key1} and {key2}")
                         jaccard_list.append([year, year, country1, country2, word, word, similarity])
-
-    # comparison by words
-    if len(words) > 1:
-        for year in years:
-            for country in countries:
-                word_pairs = combinations(words, 2)
-                for word1, word2 in word_pairs:
-                    key1 = (year, country, word1)
-                    key2 = (year, country, word2)
-                    if key1 in word_sets and key2 in word_sets:
-                        similarity = jaccard_similarity(word_sets[key1], word_sets[key2])
-                        jaccard_list.append([year, year, country, country, word1, word2, similarity])
 
     # create dataframe with all comparisons
     jaccard_df = pd.DataFrame(jaccard_list, columns=[
@@ -104,7 +98,7 @@ def calculate_jaccard_similarity(word_sets):
 
 
 # function to plot the results
-def plot_jaccard_similarity(jaccard_df, comparison_type, word_cnt=20):
+def plot_jaccard_similarity(jaccard_df, comparison_type, word_cnt=100):
     # plot figure
     plt.figure(figsize=(10, 6))
 
