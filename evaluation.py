@@ -16,7 +16,7 @@ import pandas as pd
 
 # function to extract the year and week from the string
 def extract_year_week(year_week_str):
-    # Split the string by '-' and extract the relevant parts
+    # split the string by '-' and extract the relevant parts
     year_week = year_week_str.split('-')
     year = int(year_week[2])
     week = int(year_week[3])
@@ -48,7 +48,6 @@ def get_w2v_output(data_path, crawl_names, top_lvl_domains, target_words, spacy_
         # get nearest neighbours of target words
         for word in target_words:
             key = tuple([extract_year_week(year), tld, word])
-            # https://stackoverflow.com/questions/50275623/difference-between-most-similar-and-similar-by-vector-in-gensim-word2vec
             word_lists[key] = [result[0] for result in model.wv.similar_by_word(word, word_cnt)]
 
     return word_lists
@@ -154,7 +153,7 @@ if __name__ == '__main__':
     args = get_args()
     data_path = args.path
 
-    # set arguments
+    # set arguments manually
     crawls = ['CC-MAIN-2014-00', 'CC-MAIN-2019-35', 'CC-MAIN-2024-38']
     tlds = ['at', 'de']
     target_words = ['anfassen', 'angreifen', 'anlangen']

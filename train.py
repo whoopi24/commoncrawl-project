@@ -91,7 +91,7 @@ def get_files(crawl_dir, crawl_name, top_lvl_domain='at', files_cnt=500, skip=Fa
                 if not tmp[1] in cdx_files:
                     cdx_files.append(tmp[1])
 
-    # choose only one cdx file
+    # randomly choose two cdx files - modify this number manually
     if len(cdx_files) > 1:
         random.seed(24)
         idx = random.sample(range(0, len(cdx_files)), 2)
@@ -174,10 +174,8 @@ def create_text_corpus(crawl_dir, top_lvl_domain='at', files_cnt=1000):
                             length = int(record.rec_headers.get_header('Content-Length'))
                             rec_type = record.rec_headers.get_header('Content-Type')
                             if match and length > 10000 and rec_type == "text/plain":
-                                # print(record.rec_headers.get_header('WARC-Target-URI'))
                                 content = record.content_stream().read().decode('utf-8', errors='replace')
                                 pct_cnt, sw_cnt, lb_cnt = count_pct_and_stopwords(content, stop_words)
-                                # print(pct_cnt, sw_cnt, lb_cnt)
                                 if sw_cnt == 0:
                                     continue
                                 elif pct_cnt / sw_cnt > 1 or lb_cnt / sw_cnt > 0.5:
@@ -193,7 +191,6 @@ def create_text_corpus(crawl_dir, top_lvl_domain='at', files_cnt=1000):
 def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
     input_fname = os.path.join(crawl_dir, "text_corpus.txt")
     nlp = spacy.load(spacy_model)
-    # german_words = set(nlp.vocab.strings)
 
     # Pre-compile regular expressions
     pattern1 = re.compile(r'(http|ftp|https)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])')
@@ -230,7 +227,6 @@ def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
                 final_line = [token.lemma_ for token in nlp(sent)
                               if token.is_alpha
                               and len(token) < 16   # depending on average German word length
-                              # and token.lemma_ in german_words
                               ]
                 # remove duplicated sequential lines
                 if final_line == last_line:
@@ -241,8 +237,6 @@ def preprocess_text_corpus_spacy(crawl_dir, spacy_model):
                 # append list
                 final_sent.append(final_line)
                 last_line = final_line
-
-                # print(final_line)
 
     print('Time to pre-process text: {} minutes'.format(round((time.time() - t) / 60, 2)))
 
