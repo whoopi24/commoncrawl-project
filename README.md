@@ -13,19 +13,18 @@ This project consists of the following files:
 
 If you want to know how to run this project in `Python`, go to the end of this file. There is also a written report about my project available named `report.pdf`.
 
-Since natural language develops at any time, the aim of this project is to find out if the usage
-of the German touch verbs “anfassen”, “angreifen” and “anlangen” has changed over the last
-decade. This analysis includes a comparison of two varieties of German, one spoken in Austria
-and the other in Germany. The text data has been collected from `Common Crawl` and was used to
-train one word embedding model per time period and variety. The word sets of the semantically
-related words to the target words have been compared using the “Jaccard index” in two different
-ways. Ultimately, broader insights could be obtained in relation to the findings of Ahlers and
-Fink (2017) due to the time aspect involved in the evaluation. The results show that the word
-sets for these verbs have changed over time, with more variation in Austria, and that the word
-sets of “angreifen” are linked to actions of attack as anticipated by Ahlers and Fink (2017).
-Despite facing technical limitations in data collection and preparation, this exploratory study
-lays the groundwork for future research utilizing `Common Crawl` data to examine linguistic trends
-over extended time periods.
+Since natural language develops at any time, the aim of this project is to find out if the usage of
+the German touch verbs ‘anfassen’, ‘angreifen’ and ‘anlangen’ has changed over the last decade.
+This analysis includes a comparison of two varieties of German, one spoken in Austria and the
+other in Germany. The text data is collected from `Common Crawl` and is used to train one word
+embedding model per time period and variety. The word sets of the semantically related words
+to the target words are compared using the ‘Jaccard index’ in two different ways. Ultimately,
+broader insights can be obtained in relation to the findings of Ahlers and Fink (2017) due to
+the time aspect involved in the evaluation. The results show that the word sets for these verbs
+have changed over time, with more variation in Austria, and that the word sets of ‘angreifen’ are
+linked to actions of attack as anticipated by Ahlers and Fink (2017). Despite facing technical
+limitations in data collection and preparation, this exploratory study lays the groundwork for
+future research utilizing `Common Crawl` to examine linguistic trends over extended time periods.
 
 ### Data Collection <hr>
 Included functions:
@@ -49,7 +48,7 @@ This includes removing very short lines, as well as URLs and HTML tags, sentence
 word tokenization with lemmatization, removal of every punctuation mark and every token exceeding 15 characters
 as well as duplicated sequential lines and very short sentences with less than five words. For German 
 lemmatization, the Python package `spaCy` provides various models, which differ in type and size. For this project, the model `de_core_news_md`, which
-is of medium size, has been used. For future needs, the `spaCy` model can easily be changed.
+is of medium size, is used. For future needs, the `spaCy` model can easily be changed.
 This entire procedure of creating a pre-processed text corpus has to be done for every crawl and
 every variety, i.e. top-level domain. The helper function `count_pct_and_stopwords()` is used to count stopwords,
 punctuation marks and line breaks.
@@ -58,7 +57,7 @@ punctuation marks and line breaks.
 Included functions:
 - train_model(crawl_dir, spacy_model)
 
-The main part of this function is the call of `Word2Vec()` from the `gensim` package. Each text corpus has been used 
+The main part of this function is the call of `Word2Vec()` from the `gensim` package. Each text corpus is used 
 to train one word embedding model. The model needs a broad text corpus
 as input and outputs a vector representation of each word in the vocabulary of the training
 data. Hence, it is possible to predict the context from one specific word by looking at its nearest
@@ -73,10 +72,10 @@ Included functions:
 - jaccard_similarity(list1, list2)
 - extract_year_week(year_week_str)
 
-The idea was to analyze the sets of semantically related words, named as nearest neighbors, of
-the target words “anfassen”, “angreifen” and “anlangen”. I wanted to compare the differences
-between the both varieties, Austria and Germany, and to study the changes over time. The “Jaccard index”, 
-which measures the similarity between finite sample sets, will serve as key metric. It can be calculated between:
+The idea is to analyze the sets of semantically related words, named as nearest neighbors, of
+the target words “anfassen”, “angreifen” and “anlangen”. I compare the differences
+between the both varieties, Austria and Germany, and study the changes over time. The “Jaccard index”, 
+which measures the similarity between finite sample sets, serves as key metric. It can be calculated between:
 - the word set of the first time period available and any given time period (per target word and variety) and 
 - the word sets of the two varieties (per target word and time period).
 
@@ -99,7 +98,6 @@ The default value is 500. If you want to change the `spaCy` model which is used 
 you have to edit the variable `spacy_model`. The target words are hard-coded in the variable `target_words` 
 and might also be changed for your analysis. There is always the option to run the file only for a specific 
 subtask by putting `#` in front of the functions you do not want to execute.
-
 
 If you want to evaluate and compare your trained models, you should run `evaluate.py`. 
 There is just one required parameter (`-p "data_path"`, see above) to run the file,
